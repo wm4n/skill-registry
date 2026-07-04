@@ -1,0 +1,20 @@
+{
+  "name": "wm4n-skill-registry",
+  "description": "Reusable AI agent skills registry",
+  "owner": {
+    "name": "William Chao",
+    "email": "wmandev@gmail.com"
+  },
+  "plugins": [
+    {
+      "name": "skill-registry",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/wm4n/skill-registry.git"
+      },
+      "description": "Reusable AI agent skills: JIRA integration and more",
+      "version": "1.0.0",
+      "strict": true
+    }
+  ]
+}
