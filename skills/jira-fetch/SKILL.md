@@ -26,7 +26,7 @@ Fetch a JIRA issue and output structured markdown for the calling agent to conti
 
 ## Argument Parsing
 
-- `TICKET_ID`: first token from `$ARGUMENTS` (e.g. `CACJOB-12345`)
+- `TICKET_ID`: first token from `$ARGUMENTS` (e.g. `JIRA-12345`)
 - `COMMENTS_COUNT`: value of `--comments N` if present; defaults to `5`; set to `0` to skip comments
 
 ## Phase 1: Validate Environment Variables
