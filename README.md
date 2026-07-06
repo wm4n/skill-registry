@@ -25,8 +25,8 @@ claude plugins marketplace add wm4n/skill-registry
 After installing, invoke a skill by name:
 
 ```
-/jira-fetch CACJOB-12345
-/jira-fetch CACJOB-12345 --comments 10
+/jira-fetch JIRA-12345
+/jira-fetch JIRA-12345 --comments 10
 ```
 
 ## Required Environment Variables
