@@ -24,10 +24,11 @@ Fetch a JIRA issue and output structured markdown for the calling agent to conti
 - `JIRA_EMAIL` — Atlassian account email (must be the token owner)
 - `JIRA_BASE_URL` — JIRA instance URL, e.g. `https://yourorg.atlassian.net`
 
-> Do **not** read these with skill-frontmatter inline execution (`` !`...` ``). The
-> permission layer blocks that path at load time because it contains `${...}`
-> expansion, and the skill never starts. Check the variables inside Phase 1 as a
-> normal Bash step instead.
+> Do **not** read these with the skill framework's load-time inline shell
+> execution (the bang-backtick directive). That path is blocked by the permission
+> layer because of parameter expansion, so the skill never starts — and even
+> writing the literal directive here as an example re-triggers the scanner.
+> Check the variables inside Phase 1 as a normal Bash step instead.
 
 ## JSON parsing
 

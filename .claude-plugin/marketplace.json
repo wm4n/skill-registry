@@ -13,7 +13,7 @@
         "url": "https://github.com/wm4n/skill-registry.git"
       },
       "description": "Reusable AI agent skills: JIRA integration and more",
-      "version": "1.0.1",
+      "version": "1.0.2",
       "strict": true
     }
   ]
