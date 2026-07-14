@@ -20,6 +20,7 @@ claude plugins marketplace add wm4n/skill-registry
 |-------|-------------|
 | `jira-fetch` | Fetch a JIRA issue and output structured markdown. Supports Atlassian Cloud Basic Auth. |
 | `learn-from-repo` | Build a team knowledge base from a repo's merged PRs (with linked Jira tickets and GitHub issues) — extracts business logic, architecture decisions, and lessons-learnt into `docs/knowledge/`, with human confirmation before every write. |
+| `self-evolution` | Agent self-improvement loop: learns from user corrections (root-cause → prevention rule), retrospects on detours, proposes new skills when it notices repeated work, and detects habit/inertia — persisting lessons to `~/.claude/evolution/` and a capped block in the global `~/.claude/CLAUDE.md`. |
 
 ## Usage
 
@@ -32,6 +33,8 @@ After installing, invoke a skill by name:
 ```
 
 `learn-from-repo` runs an interactive init on first use in a repo (Jira settings, branch-pattern detection, module list), then learns incrementally from a checkpoint on later runs. Prerequisites: inside a git repo with a GitHub remote, `gh` authenticated, `jq` installed.
+
+`self-evolution` is trigger-based rather than slash-invoked: it activates automatically when the user corrects the agent, when a task involved rework, or at task end (a silent quick screen). It maintains its own storage at `~/.claude/evolution/` (created on first trigger) and manages a dedicated lessons block at the end of the global `~/.claude/CLAUDE.md` (max 20 entries; existing content is never touched). New-skill proposals it drafts only take effect after explicit user approval. Instructions are written in Traditional Chinese.
 
 ## Required Environment Variables
 

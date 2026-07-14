@@ -1,7 +1,7 @@
 {
   "$schema": "https://claude.ai/schemas/plugin.json",
   "name": "skill-registry",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Reusable AI agent skills: JIRA integration, repo knowledge-base building, and more",
   "author": {
     "name": "William Chao",
