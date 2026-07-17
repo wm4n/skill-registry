@@ -480,8 +480,8 @@ def _brief(items: list) -> list:
 
 
 def collect(config: dict) -> dict:
-    repo = config["repo"]
     try:
+        repo = config["repo"]  # 放 try 內：config 缺 key 也要轉為 error 回傳
         issues = requests.get(
             f"{_API}/repos/{repo}/issues", headers=_headers(),
             params={"state": "open", "per_page": 100}, timeout=30)
