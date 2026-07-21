@@ -1,0 +1,4 @@
+interface:
+  display_name: "Repo Identity"
+  short_description: "Select a GitHub account by repository owner"
+  default_prompt: "Use this skill to select the GitHub account for a known repository owner."

@@ -1,0 +1,12 @@
+[routing]
+cac_owners = ["cac-william", "104corp"]
+cac_account = "cac-william"
+default_account = "wm4n"
+
+[accounts.cac-william]
+git_name = "cac-william"
+git_email = "william.chao@104.com.tw"
+
+[accounts.wm4n]
+git_name = "wm4n"
+git_email = "wmandev@gmail.com"
