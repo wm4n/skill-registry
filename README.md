@@ -20,6 +20,7 @@ claude plugins marketplace add wm4n/skill-registry
 |-------|-------------|
 | `jira-fetch` | Fetch a JIRA issue and output structured markdown. Supports Atlassian Cloud Basic Auth. |
 | `learn-from-repo` | Build a team knowledge base from a repo's merged PRs (with linked Jira tickets and GitHub issues) — extracts business logic, architecture decisions, and lessons-learnt into `docs/knowledge/`, with human confirmation before every write. |
+| `task-splitter` | 判斷功能需求是否過大並遞迴拆成 right-sized 子任務。用 INVEST + rubric 判大小、vertical slice 拆分、多平台採 contract-first，每個葉任務含 Gherkin 驗收與 artifact 串接契約（DAG），交棒 `writing-plans`。 |
 | `self-evolution` | Agent self-improvement loop: learns from user corrections (root-cause → prevention rule), retrospects on detours, proposes new skills when it notices repeated work, and detects habit/inertia — persisting lessons to `~/.claude/evolution/` and a capped block in the global `~/.claude/CLAUDE.md`. |
 
 ## Usage
