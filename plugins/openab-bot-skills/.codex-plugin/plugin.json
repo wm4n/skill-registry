@@ -1,6 +1,6 @@
 {
   "name": "openab-bot-skills",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "openab 三 bot 接力 pipeline（Rick/Morty/Summer）流程 skill：需求分析、開發、程式碼複審、身分路由、排程管理",
   "author": {
     "name": "William Chao",
