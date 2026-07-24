@@ -19,8 +19,8 @@
     {
       "name": "openab-bot-skills",
       "source": "./plugins/openab-bot-skills",
-      "description": "openab 三 bot 接力 pipeline（Rick/Morty/Summer）流程 skill：需求分析、開發、程式碼複審、身分路由、排程管理",
-      "version": "1.1.0",
+      "description": "openab bot 接力/單一 pipeline 流程 skill：需求分析、開發、程式碼複審、身分路由、排程管理、單一 bot 全自動開發",
+      "version": "1.2.0",
       "strict": true
     }
   ]
