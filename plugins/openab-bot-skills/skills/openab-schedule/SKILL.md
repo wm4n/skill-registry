@@ -1,15 +1,17 @@
 ---
 name: openab-schedule
-description: Use when a human asks the bot to run a task on a recurring schedule and report back (daily PR summary, weekly report, periodic alert scan...), or asks to create, modify, view, or disable a schedule. Not for one-time delayed reminders (that's /remind) or plain questions/code reading.
+description: Use whenever a human asks the bot to notify them or do something later — a one-time future reminder, a recurring report (daily PR summary, weekly report), a periodic alert scan, or any other cyclical/scheduled action — or asks to create, modify, view, or disable such a schedule. This is the only scheduling mechanism the bot may use, one-time requests included (see Iron Rules — never CronCreate/CronList/CronDelete/ScheduleWakeup, and never defer to /remind, which is human-only and never runs agent logic). Not for plain questions/code reading.
 ---
 
 # openab-schedule
 
 ## Overview
 
-Uses openab's built-in **usercron** to create recurring schedules: write a job into `~/.openab/cronjob.toml`. The scheduler polls the file's mtime every minute and hot-reloads it. When a job fires, openab injects its `message` as a **new prompt** — you act on it and post the result to the job's `channel`.
+Uses openab's built-in **usercron** to create schedules — recurring or one-time alike: write a job into `~/.openab/cronjob.toml`. The scheduler polls the file's mtime every minute and hot-reloads it. When a job fires, openab injects its `message` as a **new prompt** — you act on it and post the result to the job's `channel`.
 
-> ⚠️ **Never use `CronCreate`/`CronList`/`CronDelete`.** Those are Claude Code's own built-in, session-scoped scheduler (dies when the session ends, unrelated to openab's usercron, and does not actually deliver messages to Discord). Everything here means reading and writing the `~/.openab/cronjob.toml` file directly — never calling a scheduling tool.
+> ⚠️ **Never use `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`, or any other Claude-Code-native scheduling tool.** These belong to the harness's own session-scoped scheduler (dies when the session ends, unrelated to openab's usercron, and does not actually deliver messages to Discord) — a request that sounds like "schedule/remind/notify me" is never their job in this deployment, no matter how directly they seem to fit. Everything here means reading and writing the `~/.openab/cronjob.toml` file directly — never calling a scheduling tool.
+>
+> `/remind` is a **separate, human-only** slash command — bots are rejected if they try to invoke it, and even when a human uses it themselves it only tags someone at a fixed time, it never runs agent logic. Any request that needs the agent to actually do something later, one-time or recurring, belongs here via a usercron job — never `/remind`.
 
 ## Division of Responsibility
 
@@ -65,7 +67,7 @@ timezone = "Asia/Taipei"
 
 - `message` must be a **self-contained natural-language instruction** — when it fires, it's a brand-new turn's prompt; it must be able to work out "yesterday", what to say if there's no data, and what language to reply in, entirely on its own.
 - ⚠️ Don't bake shell, `date -d`, or crontab-style `%` escaping into `message`: `cronjob.toml` is plain TOML, not crontab, and the container's `date` (BSD vs GNU) isn't guaranteed. Leave date math to the agent that runs at fire time.
-- ⚠️ **One-off / "just run it once" requests**: cron has **no year field**. Even if you compute an exact minute/hour/day/month with `date` and put it in `schedule`, the job fires again next year on the same date and time — it is not truly one-time. Do **not** try to solve this with `disable_on_success = true` (invalid usage — see Common Mistakes). Correct approach: same as the `verify-ping` pattern in step 4 — create it, let it fire once, confirm the result, then **manually delete the job**. Don't expect it to stop itself.
+- ⚠️ **One-off / "just run it once" requests (including "remind me in N minutes" style asks)**: cron has **no year field**. Even if you compute an exact minute/hour/day/month with `date` and put it in `schedule`, the job fires again next year on the same date and time — it is not truly one-time. Do **not** try to solve this with `disable_on_success = true` (invalid usage — see Common Mistakes). Correct approach: same as the `verify-ping` pattern in step 4 — create it, let it fire once, confirm the result, then **manually delete the job**. Don't expect it to stop itself.
 
 ### 3. End-to-end test (the only trustworthy verification)
 
@@ -112,7 +114,8 @@ State clearly: the real job's time/channel/content, that you verified it with a 
 
 | Mistake | What happens | Fix |
 |---|---|---|
-| Using `CronCreate`/`CronList`/`CronDelete` | Wrong system entirely — session-scoped, dies with the session, never reaches Discord | Only ever read/write `~/.openab/cronjob.toml` |
+| Using `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup` (or any other Claude-Code-native scheduler) | Wrong system entirely — session-scoped, dies with the session, never reaches Discord | Only ever read/write `~/.openab/cronjob.toml` |
+| Treating a one-time "remind me in N minutes" request as out of scope, or as `/remind`'s job | `/remind` is human-only (bots rejected) and never runs agent logic — the promised follow-up action never happens, and the human gets no notification at all | Any request needing the agent to notify or act later — one-time or recurring — belongs here, via a one-off usercron job (see step 2's one-off guidance), then manual delete once confirmed |
 | `channel` set to a thread ID | Every fire fails: `failed to create thread: Cannot execute action on this channel type` | `channel` = real channel ID; use `thread_id` alongside it to target a specific thread |
 | Claiming "it's set up" right after writing the file | No proof it actually fires — silent, invisible failure the human won't notice for days | Always run the step-3 ping test first |
 | Fabricating a ping reply (e.g. running `date` and typing a message that looks like a fire) | Looks like success, proves nothing — the real mechanism was never exercised | Only trust the exact `🕐 [sender_name]: message` format arriving as a standalone new message |
@@ -122,7 +125,7 @@ State clearly: the real job's time/channel/content, that you verified it with a 
 
 ## Iron Rules
 
-- Manage schedules only by reading/writing `~/.openab/cronjob.toml` — never `CronCreate`/`CronList`/`CronDelete`.
+- Manage schedules only by reading/writing `~/.openab/cronjob.toml` — never `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`/any other Claude-Code-native scheduler, and never by pointing the human at `/remind` when the request needs the agent to act.
 - Enabling usercron itself (config + restart) is not yours to do — say so plainly, never fake it.
 - Never tell the human "it's live" before the step-3 ping test passes with a real signal.
 - Read the existing file before writing; add/replace by `id`; never clobber someone else's job.
