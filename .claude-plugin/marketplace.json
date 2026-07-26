@@ -29,6 +29,13 @@
       "description": "獨立、不接力的單一 bot 全自動開發流程 skill（如 genie）：需求分析到 PR 一手包辦、排程管理",
       "version": "1.0.4",
       "strict": true
+    },
+    {
+      "name": "mac-disk-cleanup",
+      "source": "./plugins/mac-disk-cleanup",
+      "description": "macOS 磁碟空間分析 skill：唯讀掃描快取、日誌、暫存、垃圾桶、大檔/舊檔、node_modules、各套件管理器快取、Docker、Xcode、iOS 備份、Time Machine 本機快照，產生分類 + 風險徽章 + 可複製清理指令的報告；只掃描不刪除。",
+      "version": "1.0.0",
+      "strict": true
     }
   ]
 }
