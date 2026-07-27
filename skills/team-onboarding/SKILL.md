@@ -64,6 +64,24 @@ in the language of the source material (do not force-translate the team's rules)
 Every entry carries a stable id (`N###`/`S###`/`W###`, next = current max + 1) and a
 **source tag** (which document or interview it came from).
 
+**Tiering rules (apply to keep runs consistent):**
+
+- **`never.md` is only for the truly catastrophic.** An entry goes to MUST-NOT
+  *only* when the source explicitly frames it as an absolute/hard "don't" (e.g. a
+  "never do X" list, or a rule tied to a stated incident). Prohibition *wording*
+  alone does not qualify: a rule that uses "must not / 不可 / 別" but sits inside a
+  conventions or style section stays a SHOULD in `standards.md`. When unsure, prefer
+  `standards.md` — MUST-NOT is a short, high-signal list, not a dumping ground.
+- **`workflow.md` vs `standards.md` tiebreaker.** If a rule is about the *sequence*
+  of getting change shipped — branch/PR/review/release flow, env setup steps — it
+  goes to `workflow.md`. If it's a rule about the *content* of code or commits —
+  naming, style, module boundaries, commit-message format — it goes to
+  `standards.md`. Pick one deterministically so `--update` re-runs don't reshuffle.
+- **`never.md` is canonical.** The MUST-NOT list inside the `CLAUDE.md` block is a
+  generated, condensed mirror of `never.md` (rule text only — drop the `source:` tag
+  and any parenthetical detail). On conflict, `never.md` wins and the block is
+  regenerated from it.
+
 ## Workflow
 
 1. **Detect mode.** If `~/.claude/team-profile/INDEX.md` is missing → first-time
@@ -107,6 +125,23 @@ never.md      - [N001] <rule> — source: <doc name / interview date>
 standards.md  - [S001] (SHOULD|MAY) <rule> — source: <…>
 workflow.md   - [W001] <process note> — source: <…>
 glossary.md   - **<term>**: <definition> — source: <…>
+```
+
+`INDEX.md`:
+
+```
+# team-profile INDEX
+
+updatedAt: <YYYY-MM-DD>
+
+## Entry counts
+- never.md (MUST-NOT): <n>
+- standards.md (SHOULD/MAY): <n>
+- workflow.md: <n>
+- glossary.md: <n> terms
+
+## Sources
+- <doc name / URL / interview> — <one-line note> (imported <YYYY-MM-DD>)
 ```
 
 `CLAUDE.md` block (fixed heading; the self-check instruction is what drives the
