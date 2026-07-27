@@ -1,6 +1,6 @@
 ---
 name: openab-schedule
-description: Use whenever a human asks the bot to notify them or do something later — a one-time future reminder, a recurring report (daily PR summary, weekly report), a periodic alert scan, or any other cyclical/scheduled action — or asks to create, modify, view, or disable such a schedule. This is the only scheduling mechanism the bot may use, one-time requests included (see Iron Rules — never CronCreate/CronList/CronDelete/ScheduleWakeup, and never defer to /remind, which is human-only and never runs agent logic). Not for plain questions/code reading.
+description: Use whenever a human asks the bot to notify them or do something later — a one-time future reminder, a recurring report (daily PR summary, weekly report), a periodic alert scan, or any other cyclical/scheduled action — or asks to create, modify, view, or disable such a schedule. This is the only scheduling mechanism the bot may use, one-time requests included (see Overview — never CronCreate/CronList/CronDelete/ScheduleWakeup, and never defer to /remind, which is human-only and never runs agent logic). Not for plain questions/code reading.
 ---
 
 # openab-schedule
@@ -22,7 +22,7 @@ Uses openab's built-in **usercron** to create schedules — recurring or one-tim
 
 ## Hard Gate — Resolve Every Field, Then Confirm With One Summary Card
 
-Before writing to `cronjob.toml`, resolve **all** of the fields below — parse whatever the human specified, fill the rest with defaults — then post them **together as a single summary card** and wait for the human to confirm. Never write the file first and explain after; never confirm one field at a time as separate messages; never omit a field from the card because it "obviously" has a default.
+This card gates **creating a schedule or changing its content** — disabling, deleting, or listing existing jobs follow steps 5–6, not this card. Before writing a new or modified schedule to `cronjob.toml`, resolve **all** of the fields below — parse whatever the human specified, fill the rest with defaults — then post them **together as a single summary card** and wait for the human to confirm. Never write the file first and explain after; never confirm one field at a time as separate messages; never omit a field from the card because it "obviously" has a default.
 
 ```
 📋 排程確認
@@ -126,7 +126,7 @@ Once step 3's ping test passes, report back clearly — never just "it's set up"
 
 #### Computing fire times
 
-Never eyeball a cron schedule against a clock in your head — that's the same class of mistake behind this skill's `ScheduleWakeup` incident (wrong tool, then a time reported without real computation). Actually compute each fire time in the job's confirmed timezone:
+Never eyeball a cron schedule against a clock in your head — a wrong tool plus a time asserted without real computation is exactly how this goes wrong. Actually compute each fire time in the job's confirmed timezone:
 
 - Prefer a scripting tool with real timezone/cron support if the container has one (e.g. `python3` with `zoneinfo` for timezone conversion) — check it's actually available before trusting its output.
 - If nothing reliable is available, reason through the cron fields by hand (minute → hour → day-of-month → month → day-of-week) against the current date in the confirmed timezone, and show your work rather than asserting a number.
@@ -175,37 +175,29 @@ When asked to list current jobs, don't dump the raw TOML. Read `~/.openab/cronjo
 
 ## Common Mistakes
 
+These are the excuses agents actually reach for under pressure — the body's rules cover the mechanics, this table covers the temptation.
+
 | Mistake | What happens | Fix |
 |---|---|---|
-| Using `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup` (or any other Claude-Code-native scheduler) | Wrong system entirely — session-scoped, dies with the session, never reaches Discord | Only ever read/write `~/.openab/cronjob.toml` |
+| Using `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup` (or any other Claude-Code-native scheduler) — "this is obviously a scheduling request" | Wrong system entirely — session-scoped, dies with the session, never reaches Discord | Only ever read/write `~/.openab/cronjob.toml` |
 | Treating a one-time "remind me in N minutes" request as out of scope, or as `/remind`'s job | `/remind` is human-only (bots rejected) and never runs agent logic — the promised follow-up action never happens, and the human gets no notification at all | Any request needing the agent to notify or act later — one-time or recurring — belongs here, via a one-off usercron job (see step 2's one-off guidance), then manual delete once confirmed |
-| `channel` set to a thread ID | Every fire fails: `failed to create thread: Cannot execute action on this channel type` | `channel` = real channel ID; use `thread_id` alongside it to target a specific thread |
 | Claiming "it's set up" right after writing the file | No proof it actually fires — silent, invisible failure the human won't notice for days | Always run the step-3 ping test first |
 | Fabricating a ping reply (e.g. running `date` and typing a message that looks like a fire) | Looks like success, proves nothing — the real mechanism was never exercised | Only trust the exact `🕐 [sender_name]: message` format arriving as a standalone new message |
 | `disable_on_success = true` for a "run once" job | Not valid syntax; does not auto-disable anything; the job still fires again next year (no year field in cron) | Manually delete the job after confirming it fired once |
-| Guessing `channel`/`timezone`/`message` instead of asking | Job silently posts to the wrong place, wrong time, or can't act on vague instructions | Confirm all three (or an explicit safe default) before writing |
-| Overwriting the whole file with just the new job | Destroys everyone else's existing schedules | Read the file first, keep existing `[[jobs]]`, add/replace by `id` |
-| Disabling or deleting a job without telling the human what stopped | Human doesn't know if the automation they expected is gone, still running, or partially changed — may miss an expected notification or get a surprise one later | State which job (`id` + one-line summary) was disabled/deleted and its next-would-have-been fire time |
-| Dumping raw `cronjob.toml` content when asked to list jobs | Hard to scan, buries next-run timing in cron syntax, drowns the human in the full `message` text | Present a table: id / schedule (plain language + cron) / next run / channel / instruction summary (see step 6) |
-| Silently defaulting `channel` to "wherever this conversation is happening" when more than one channel is available (e.g. a dedicated `*-notify` channel exists) | Schedule fires into the wrong channel with no new thread there; the human has to notice and correct it after the fact | Ask which channel to use whenever more than one is plausible — never assume "this channel" is right just because it's convenient |
 | Performing the requested action immediately, then writing a generic "time's up" ping as `message` | The action lands at the wrong time (now, instead of when the human asked for it) and the actual fire event carries no real content | Put the full self-contained instruction for the deferred action into `message` — your immediate reply only confirms the schedule, it doesn't do the work early |
-| Confirming fields one at a time in separate messages, or skipping straight to writing without a summary card | Slower back-and-forth, and a wrong field is easy to miss when it isn't shown alongside everything else | Resolve every field first, post ONE structured summary card (see Hard Gate), wait for confirmation |
-| Omitting `sender_name` or `thread_id` from the confirmation card because they "obviously" have defaults | Human never sees (and can't veto) that a new thread will be created, or what label the schedule shows under | Always show every field in the card, including ones you defaulted yourself |
 | Writing `message` with plain-text "notify them" / "@name" instead of baking in real `<@USER_ID>` mention syntax | The fired turn has zero memory of who asked — it can't invent a real mention, so the notification never actually pings anyone | Resolve the requester's Discord user ID at confirmation time and embed the literal `<@ID>` mention inside `message` itself |
 
-## Iron Rules
+## Red Flags — STOP
 
-- Manage schedules only by reading/writing `~/.openab/cronjob.toml` — never `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`/any other Claude-Code-native scheduler, and never by pointing the human at `/remind` when the request needs the agent to act.
-- Enabling usercron itself (config + restart) is not yours to do — say so plainly, never fake it.
-- Never tell the human "it's live" before the step-3 ping test passes with a real signal.
-- Read the existing file before writing; add/replace by `id`; never clobber someone else's job.
-- `channel` must be a human-confirmed real channel ID; `timezone` must always be explicit.
-- `message` must be a self-contained natural-language instruction — no baked-in shell or date logic.
-- Delete one-off test/one-time jobs by hand once confirmed — don't rely on `disable_on_success = true` to stop them.
-- When creating a job, report the exact confirmed fire time(s) — computed, never eyeballed — including the next 3 fire times for a recurring job.
-- When disabling or deleting a job, state which job it was and what future execution it cancels.
-- When listing jobs, present a table (id / schedule / next run / channel / instruction summary) — never dump raw TOML.
-- Never default `channel` to "wherever this conversation is happening" — ask when more than one channel is plausible, especially if one is purpose-named for notifications.
-- If the human's request bundles a delayed notification with work to do, put that work into `message` to run at fire time — never do it immediately and leave `message` as a bare ping.
-- Resolve every field and present them as a single confirmation card before writing — never write first, never confirm field-by-field, never omit a field because it has an obvious default.
-- If a fire should ping someone, resolve their Discord user ID at confirmation time and bake the literal `<@ID>` mention into `message` — never leave "notify them" as plain text for the fired turn to guess.
+These thoughts mean you're one step from breaking the skill. Each one sends you back to the step in parentheses:
+
+- "Let me just do the work now (fetch Jira / run the PR query), then set the reminder." → that work belongs in `message`; doing it now runs it at the wrong time (Hard Gate field 1).
+- About to call `CronCreate`/`CronList`/`CronDelete`/`ScheduleWakeup`, or about to tell the human to use `/remind`. → only ever read/write `cronjob.toml` (Overview).
+- "File's written — I'll tell them it's set up." → not until the step-3 ping fires for real (step 3).
+- "I ran `date` / replied myself and it looks like it fired." → self-generated text isn't a real signal; only a standalone `🕐 [sender_name]: message` counts (step 3).
+- "Writing `@william` will ping them." → plain text never renders; resolve the `<@USER_ID>` at confirmation time and bake it into `message` (Hard Gate field 2).
+- "I'll just use whatever channel this conversation is in." → never default to the current channel when more than one is plausible; ask (Hard Gate field 5).
+- "I'll set `disable_on_success = true` so the one-off stops itself." → it won't; cron has no year field — fire once, then delete by hand (step 2).
+- About to write the file, or confirm fields one at a time. → resolve every field first, post ONE summary card, wait for confirmation (Hard Gate).
+
+Two things are never yours to fake: enabling usercron itself (config + container restart — say so plainly), and a "it's live" claim before a real ping.
