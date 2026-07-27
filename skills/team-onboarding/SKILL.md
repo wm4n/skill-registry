@@ -24,6 +24,11 @@ knowledge applies in every repository without per-repo setup.
 **Layered application:** hard prohibitions ("never do X") stay always-on in
 `CLAUDE.md`; everything else lives in profile files that are recalled on demand.
 
+**Scope:** this skill targets Claude Code — the `~/.claude/` paths below are Claude
+Code conventions. It maintains a single team profile by design (multi-team switching
+is a deliberate non-goal; if you ever need it, give profiles distinct directory
+names). Porting to another agent means relocating these paths.
+
 ## When to Use
 
 - A developer wants the bot to absorb team conventions, coding standards,
@@ -88,33 +93,63 @@ Every entry carries a stable id (`N###`/`S###`/`W###`, next = current max + 1) a
    onboard. If it exists or `--update` is passed → incremental update (load existing
    entries first, for dedup). Parse `$ARGUMENTS`: first token as a path/URL source;
    `--interview` for interview mode.
-2. **Collect sources.** Folder/path → `Glob` for `*.md`/`*.txt`/`*.pdf`, read each
-   (ask the user to export `.docx` to md/pdf first). URL → `WebFetch`, **confirm with
-   the user before fetching**. `--interview` → ask the questions below, one at a time.
+2. **Collect sources.** Folder/path → `Glob` for `*.md`/`*.txt`/`*.pdf`, read each.
+   PDFs are read directly with the `Read` tool (use page ranges for long files); ask
+   the user to export `.docx` to md/pdf first. URL → `WebFetch`, **confirm with the
+   user before fetching**. `--interview` → ask the questions below, one at a time.
    Pasted text → use directly.
 3. **Extract and tier.** Pull candidate entries; tag each with severity + category +
-   source. Prefer quality over quantity — a document may yield zero entries.
+   source, following the extraction heuristics below.
 4. **Confirm before writing.** Present candidates grouped by tier with temporary
-   numbers; ask: accept all / delete #n / edit #n. Dedup against existing entries;
-   on a semantic conflict, show both versions and let the user decide. **Never write
-   any file before explicit confirmation.**
+   numbers; ask: accept all / delete #n / edit #n. Dedup against existing entries.
+   On `--update`, a reworded version of an existing rule → edit in place, keeping its
+   id; a genuine contradiction (new source says the opposite) → show both versions and
+   let the user decide, defaulting to the newest source. **Never write any file before
+   explicit confirmation.**
 5. **Write in fixed order:** category files → `INDEX.md` → `CLAUDE.md` block. Each
    `never.md` entry is mirrored into the always-on list. This order makes a mid-run
    interruption safe to re-run.
 6. **Report.** Summarize entries added/updated, counts per tier, and the source list.
    Do **not** auto-commit (`~/.claude/` is not this repo).
 
+## Extraction Heuristics
+
+What deserves to become an entry:
+
+- **A durable rule or convention the team expects everyone to follow** — not a
+  one-off instruction, not a description of what some code currently does.
+- **Prefer quality over quantity.** A document may yield zero entries. Skip generic
+  best practices ("write clean code"), tooling trivia already obvious from the repo,
+  and step-by-step implementation detail that belongs in the docs, not the profile.
+- **Tier by how the source frames it, not by wording** — see the tiering rules above.
+  A stated incident or an explicit "never"/"絕對不可" → `never.md`; a preference or a
+  "try to"/"盡量" → MAY.
+
+Examples (from an onboarding doc):
+
+| Source line | Decision |
+|---|---|
+| "Never commit `keystore` — we had a leak once" | `never.md` (MUST-NOT), incident-backed |
+| "`presentation` 不可反向依賴" (under 程式碼規範) | `standards.md` SHOULD — prohibition-worded convention, not flagged absolute |
+| "PR 盡量切小" | `standards.md` MAY — soft preference |
+| "Use `./gradlew assembleDevelopDebug` to build" | **skip** — tooling trivia, not a rule |
+
 ## Interview Questions (`--interview`)
 
-Ask one at a time; after each answer, ask whether it is an "absolute don't" or a
-"suggestion" so it can be tiered.
+Ask one at a time; after each answer, ask whether it is an "absolute don't", a
+convention, or a "suggestion" so it can be tiered.
 
+**Core:**
 1. Branch strategy? (trunk / feature branches / naming)
 2. PR and code-review rules? (who reviews, required approvals, required checks)
 3. Testing expectations? (coverage, which tests are mandatory, CI gates)
 4. Absolute don'ts? (past incidents, hard prohibitions)
 5. Naming and code-style conventions?
 6. Team terminology / domain jargon?
+
+**Optional extensions (ask if relevant, and invite the user to add their own):**
+security & secret handling, logging/observability/monitoring, deployment & release
+details, error handling & rollback habits, documentation standards.
 
 ## Entry & Block Templates
 
@@ -150,7 +185,9 @@ updatedAt: <YYYY-MM-DD>
 ```
 ## 團隊規範（由 team-onboarding skill 維護）
 
-動工前與 commit 前，對照下列「絕不可犯」清單自檢；需要細則時讀 `~/.claude/team-profile/`。
+主動回憶時機：**動工前**先掃 `~/.claude/team-profile/workflow.md`（流程）與相關
+`standards.md` 條目；**寫 code 時**對照 `standards.md`；**commit / push 前**對照下列
+「絕不可犯」清單自檢。需要細則時讀 `~/.claude/team-profile/`。
 
 ### 絕不可犯（MUST-NOT）
 - [N001] <rule>
