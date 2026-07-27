@@ -1,7 +1,7 @@
 {
   "$schema": "https://claude.ai/schemas/plugin.json",
   "name": "solo-bot-skills",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "獨立、不接力的單一 bot 全自動開發流程 skill（如 genie）：需求分析到 PR 一手包辦、排程管理",
   "author": {
     "name": "William Chao",
