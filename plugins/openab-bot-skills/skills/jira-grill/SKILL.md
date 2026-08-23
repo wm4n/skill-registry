@@ -2,12 +2,11 @@
 name: jira-grill
 argument-hint: "discover | ticket <JIRA-ticket-id>"
 description: >-
-  Rick 專屬、獨立於三 bot 接力 pipeline 之外的 Jira 需求審視能力。Jira 票貼上
-  grill-me label 後，套用 mattpocock-skills:grilling 的 design-tree/frontier
-  方法論對需求連續提問；提問與回答都透過 Jira comment 進行。靠 openab 的
-  usercron（同一個 cron job 重複觸發永遠落在同一個 Discord thread、延續同一個
-  ACP session）讓每張票的問答自成一條可長期接續的對話。收斂或人類喊停後貼出
-  結論、通知人類，不自動進入開發、不自動交棒給任何 bot。
+  Jira grill-me 需求審視。由 discovery/per-ticket cron job 觸發（不是
+  @mention、不在 Discord 對話）：票貼 grill-me label 後在 Jira comment 上
+  用 grilling 式連續追問（design tree/frontier，見
+  mattpocock-skills:grilling），收斂或人類喊停後只貼結論通知人類，不自動
+  開發、不交棒。獨立於三 bot 接力 pipeline。
 ---
 
 # Jira Grill
@@ -21,6 +20,38 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
   的票並啟動它們。
 - `ticket <TICKET_ID>`：由該票專屬的 cron job 呼叫，檢查這張票是否有新回覆
   並推進下一輪。
+
+## 提問格式與簽名標記
+
+沿用 `mattpocock-skills:grilling` 的 design tree/frontier 方法論：每輪只
+問前提已經 settled 的問題（frontier），問完就等下一則留言；新留言到了才
+重算下一輪 frontier；frontier 真正清空——每個分支都有明確答案，不是「問到
+差不多就好」——才算收斂。
+
+一輪的所有 frontier 問題合併成同一則 comment：
+
+```
+❓ **Q1** - **<問題標題>**：<問題內容，可多段、可列選項>
+
+➡️ <你的建議答案>
+```
+
+多題就重複這組 `❓`/`➡️`，最後只收尾一次：
+
+```
+---
+目前還有 {N} 個分支未決。
+
+— By Rick (jira-grill)
+```
+
+第一輪（剛偵測到 `grill-me`、還沒有任何回覆）以票的標題、描述、驗收條件為
+輸入直接產出 frontier，不要等留言。
+
+**簽名是機器可辨識標記，不是裝飾**：結尾固定 `— By Rick (jira-grill)`
+（不是 persona 其他情境用的 `— By Rick`）。流程二靠這串文字判斷「留言區塊
+最上面那則是不是自己剛貼的」，沒有新回覆時直接結束、省掉整輪 Jira 呼叫。
+改了格式，no-op 判斷會失效，導致同一輪問題重複問或漏判新回覆。
 
 ## 環境變數
 
@@ -67,7 +98,7 @@ fi
 ### 貼 comment
 
 ```bash
-# COMMENT_BODY 是要貼的完整文字（含結尾簽名，見下方「Grilling 提問格式」）
+# COMMENT_BODY 是要貼的完整文字（含結尾簽名，見上方「提問格式與簽名標記」）
 node -e '
 const body = process.argv[1];
 process.stdout.write(JSON.stringify({ body }));
@@ -116,8 +147,8 @@ for (const i of issues) console.log(i.key);
    b. 把 label 從 `grill-me` 換成 `grill-me-active`（改 label 失敗 → 跳過
       這張票，印出錯誤，繼續下一張，不建立 cron job，留給下次 discovery
       重試）。
-   c. 用 grilling 方法論，以描述+驗收條件為輸入，產出第一輪 frontier
-      問題（見下方「Grilling 提問格式」），貼成第一則 comment。
+   c. 以描述+驗收條件為輸入，產出第一輪 frontier 問題（格式見上文「提問
+      格式與簽名標記」），貼成第一則 comment。
    d. 用 `openab-schedule` skill 的 `[[jobs]]` TOML 語法（**不要**套用它
       文件裡「先跟人類確認卡片」那段流程——discovery 是無人在場的自動
       觸發，人類已經透過核准這份 spec 一次性授權這套自動建立/清理 job
@@ -142,19 +173,17 @@ for (const i of issues) console.log(i.key);
    labels、全部留言，留言依 `jira-fetch` 慣例新到舊排序）。
 3. **中止訊號 1（label 被人類改掉）**：若回傳的 labels 不含
    `grill-me-active`，視為人類已手動中止 → 跳到步驟 6b。
-4. **判斷有沒有新回覆**：看留言區塊最上面（最新）那一則，若內容包含
-   Rick 自己的簽名標記 `— By Rick (jira-grill)` → 目前最新一則是 Rick
-   自己貼的，代表還沒有新回覆 → 直接結束（no-op，不做任何 Jira 呼叫以外
-   的動作，這是最常見的情況，要盡量精簡輸出以控制成本）。若最新一則不含
-   這個標記 → 有新回覆，繼續步驟 5。
-5. **中止訊號 2（人類文字喊停）**：若步驟 4 判定的新回覆內容明確表達停止
-   意圖（例如「先這樣」「夠了」「不用再問了」「停止」「stop」「that's
-   enough」「no more questions」等同義表達，靠語意判斷、不是精確關鍵字
-   比對）→ 跳到步驟 6b（人類中止，非自然收斂）。否則視為對上一輪 frontier
-   的回答，依 grilling 方法論用完整留言串重新計算 design tree：
-   - 還有未決分支 → 產出下一輪 frontier 問題，貼成新 comment（格式見下），
-     結尾附「目前還有 N 個分支未決」的進度摘要 → 結束（label、cron job
-     都不動）。
+4. **判斷有沒有新回覆**：看留言區塊最上面（最新）那一則，若含簽名標記
+   `— By Rick (jira-grill)` → 還沒有新回覆 → 直接結束（no-op，這是最
+   常見的情況，輸出盡量精簡以控制成本）。否則有新回覆，繼續步驟 5。
+5. **中止訊號 2（人類文字喊停）**：若這則新回覆明確表達停止意圖（例如
+   「先這樣」「夠了」「不用再問了」「停止」「stop」「that's enough」
+   「no more questions」等同義表達，靠語意判斷、不是精確關鍵字比對）→
+   跳到步驟 6b（人類中止，非自然收斂）。否則視為對上一輪 frontier 的
+   回答，用完整留言串重新計算 design tree：
+   - 還有未決分支 → 產出下一輪 frontier 問題，貼成新 comment（格式見
+     上文），結尾附「目前還有 N 個分支未決」的進度摘要 → 結束（label、
+     cron job 都不動）。
    - Frontier 已清空（雙方對需求達成共識）→ 跳到步驟 6a。
 6. **收斂/中止收尾**（6a 自然收斂 / 6b 人類中止，兩者都要做完下面全部）：
    a. 自然收斂：貼一則「✅ 需求共識」comment，把整輪問答蒸餾成結構化的
@@ -169,45 +198,15 @@ for (const i of issues) console.log(i.key);
       這個 `[[jobs]]` 區塊（保留其他 job），寫回檔案——這張票不再需要
       輪詢。
 
-## Grilling 提問格式
-
-沿用 `mattpocock-skills:grilling` 的格式，每一輪的所有 frontier 問題合併
-成同一則 comment：
-
-```
-❓ **Q1** - **<問題標題>**：<問題內容，可多段、可列選項>
-
-➡️ <你的建議答案>
-
-❓ **Q2** - **<問題標題>**：<問題內容>
-
-➡️ <你的建議答案>
-
----
-目前還有 {N} 個分支未決。
-
-— By Rick (jira-grill)
-```
-
-第一輪（`grill-me` 剛被偵測到、還沒有任何人類回覆）以 Jira 票本身的標題、
-描述、驗收條件為輸入直接產出 frontier；不要等留言。
-
-**簽名規則**：本 skill 貼的每一則 comment（提問、收斂、中止）結尾都必須是
-`— By Rick (jira-grill)`（注意：不是 persona 檔裡其他情境用的
-`— By Rick`，多了 `(jira-grill)` 是本 skill 判斷「新回覆 vs 自己的舊留言」
-的機器可辨識依據，改了會讓 no-op 判斷失效，造成同一輪問題重複問或漏判新
-回覆）。
-
 ## 已知限制
 
 - **收斂/中止通知不是真正的 Jira @mention**：只是純文字寫 reporter/
   assignee 的 displayName，不是會觸發 Jira 通知的 `[~accountId]` 語法。
   實務上 Jira 預設會對「有新留言」通知 reporter/assignee/watcher，這則
   純文字提及只是方便人類在畫面上找到自己，不是通知機制本身。
-- **中止訊號辨識靠語意判斷**，不是精確關鍵字比對，極端措辭可能誤判——但
-  收斂/中止都會留下明確的 comment 記錄，人類事後可查、可用 label 手動
-  介入（把 label 改回 `grill-me` 會被下次 discovery 當成全新票重新處理，
-  這是可接受的行為，不是 bug）。
+- **中止/收斂路徑沒有回頭鍵，但這是可接受的**：把 label 改回 `grill-me`
+  會被下次 discovery 當成全新票重新處理——這是設計上允許的行為，不是
+  bug。
 - **成本隨並行票數線性增加**：每張正在 grill 的票每 10 分鐘觸發一次
   agent 推理（多數是「沒有新留言→no-op」的低成本輸出），票數一多會累積
   明顯的 Claude 用量。
