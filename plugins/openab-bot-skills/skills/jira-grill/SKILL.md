@@ -32,13 +32,24 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 
 1. Jira 票的欄位（描述、custom field）裡有明確的 `owner/repo` 或 GitHub
    URL → 直接用。
-2. 依 JIRA project key 查產品對照表：
+2. 用 `product-context` skill 背後的登錄表解析：即時抓取（不 clone、不
+   落地）：
    ```bash
    gh auth switch --hostname github.com --user cac-william
-   gh api repos/104corp/cac-ai-rules/contents/product-repo-map.md --jq '.content' | base64 -d
+   gh api repos/104corp/104cac-product-registry/contents/products.yaml \
+     -H "Accept: application/vnd.github.raw+json"
    ```
-   從對照表找 project key 對應的 repo。
-3. 都找不到 → **repo 未定**。把「這個需求要動到哪個 repo？」併入第一輪
+   以票號的 project key（`TICKET_ID` 連字號前的部分，如 `CACJOB-123` →
+   `CACJOB`）比對各產品的 `jira.project`——這裡輸入是已知的 project
+   key，不是 `product-context` 原本設計吃的「使用者自由語句比對
+   name/aliases」，比對邏輯換掉，登錄表這個單一真相來源不換：
+   - 命中單一產品、且該產品只有一個 repo → 直接用。
+   - 命中單一產品但 `repos[]` 有多個（依 role，如 android/ios/backend）
+     → 把「這個需求對應哪個 repo/平台」併入第一輪 frontier。
+   - 命中多個產品共用同一個 project key、完全沒命中、或 `gh api` 抓取
+     失敗（比照 `product-context` 自己的 edge case：不臆測、不中斷任務）
+     → 都視為未解析，繼續步驟 3。
+3. 都無法決定 → **repo 未定**。把「這個需求要動到哪個 repo？」併入第一輪
    frontier（跟其他問題貼在同一則 comment），當成一般 frontier 問題處理，
    不是特殊流程，等 Jira 回覆。
 
@@ -254,9 +265,11 @@ for (const i of issues) console.log(i.key);
 
 ## 已知限制
 
-- **repo 解析只涵蓋現有慣例**：104corp 任務靠 `product-repo-map.md`；
-  wm4n 個人任務沒有對照表可查，公司任務查不到對照表項目時也一樣——一律
-  把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，不是失敗。
+- **repo 解析只涵蓋現有慣例**：104corp 任務靠 `104cac-product-registry`
+  的登錄表（以 project key 比對 `jira.project`）；wm4n 個人任務沒有登錄
+  表可查，公司任務查不到對應項目、或一個產品對到多個 repo/平台時也一
+  樣——一律把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，
+  不是失敗。
 - **收斂/中止通知不是真正的 Jira @mention**：只是純文字寫 reporter/
   assignee 的 displayName，不是會觸發 Jira 通知的 `[~accountId]` 語法。
   實務上 Jira 預設會對「有新留言」通知 reporter/assignee/watcher，這則
