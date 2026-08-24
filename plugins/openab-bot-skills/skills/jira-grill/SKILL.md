@@ -1,10 +1,11 @@
 ---
 name: jira-grill
-argument-hint: "discover | ticket <JIRA-ticket-id> [repo=<owner/repo>]"
+argument-hint: "ticket <JIRA-ticket-id>"
 description: >-
-  Jira grill-me 需求審視。由 discovery/per-ticket cron job 觸發（不是
-  @mention、不在 Discord 對話）：票貼 grill-me label 後，先解析並準備好
-  對應的 GitHub repo，再在 Jira comment 上用 grilling 式連續追問（design
+  Jira grill-me 需求審視。由獨立部署的 jira-grill-poller（K8s CronJob，
+  不含 LLM）偵測到新票或人類新回覆後，用專用的 jira-grill-trigger bot
+  @mention 觸發（不是人類 @mention、不在一般 Discord 對話）：先解析並準備
+  好對應的 GitHub repo，再在 Jira comment 上用 grilling 式連續追問（design
   tree/frontier，見 mattpocock-skills:grilling），收斂或人類喊停後只貼
   結論通知人類，不自動開發、不交棒。獨立於三 bot 接力 pipeline。
 ---
@@ -12,15 +13,15 @@ description: >-
 # Jira Grill
 
 Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留言判斷目前進度，
-不依賴 session 記憶本身的正確性。Session 延續只是效率紅利。
+不依賴 session 記憶本身的正確性。
 
-## 兩種觸發模式（`$ARGUMENTS`）
+## 觸發方式（`$ARGUMENTS`）
 
-- `discover`：由固定的 discovery cron job 呼叫，找出新貼 `grill-me` label
-  的票並啟動它們。
-- `ticket <TICKET_ID> [repo=<owner/repo>]`：由該票專屬的 cron job 呼叫，
-  檢查這張票是否有新回覆並推進下一輪；`repo=` 有帶就是已知的目標
-  repo（見下）。
+`ticket <TICKET_ID>`：由獨立部署的 `jira-grill-poller`（deterministic
+K8s CronJob，見 `deployment-guides/k3s/jira-grill-poller/`）判斷這張票
+需要處理後，用 `jira-grill-trigger` bot 貼出這個指令觸發。poller 已經
+確認過這是真的新票或真的有新回覆，這裡不用再自己判斷要不要處理——只有
+一個輕量防護例外，見下方流程步驟 3「重複觸發防護」。
 
 ## Repo 解析與準備
 
@@ -64,11 +65,9 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
    的事實（檔案結構、既有慣例、技術限制）寫進問題內容。你自己查得到的
    事實不該變成丟給人類的問題，只有真正的決策才問人類。
 
-**discovery 建立 per-ticket cron job 時**，把已解析出的 repo 一併寫進
-`message`（`執行 jira-grill skill，參數：ticket <TICKET_ID> repo=
-<owner/repo>`），之後每輪直接讀這個值、只做 `git fetch`/`pull`，不用
-重跑解析。若當時還沒解析出來，`message` 不帶 `repo=`，流程二會在拿到
-回覆後自己補上（見流程二 步驟 6）。
+**每一輪都重新走一次這個優先序**（不快取解析結果）：解析成本本身很低，
+重算比維護快取簡單——沒有 per-ticket cron job 的 message 可以拿來存
+`repo=` 這種狀態了。
 
 ## 提問格式與簽名標記
 
@@ -99,20 +98,15 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 留言。
 
 **簽名是機器可辨識標記，不是裝飾**：結尾固定 `— By Rick (jira-grill)`
-（不是 persona 其他情境用的 `— By Rick`）。流程二靠這串文字判斷「留言區塊
-最上面那則是不是自己剛貼的」，沒有新回覆時直接結束、省掉整輪 Jira 呼叫。
-改了格式，no-op 判斷會失效，導致同一輪問題重複問或漏判新回覆。
+（不是 persona 其他情境用的 `— By Rick`）。`jira-grill-poller` 跟下方
+流程步驟 3 都靠這串文字判斷「留言區塊最上面那則是不是自己剛貼的」。改了
+格式，兩邊的判斷都會失效，導致同一輪問題重複問或漏判新回覆。
 
 ## 環境變數
 
 - `JIRA_TOKEN` / `JIRA_EMAIL` / `JIRA_BASE_URL`：同 `jira-fetch` skill。
-- `JIRA_GRILL_CHANNEL`：discovery job 建立 per-ticket cron job 時要用的
-  Discord channel ID（Rick 既有頻道）。
-- `JIRA_GRILL_PROJECTS`：discovery 掃描的 Jira project key 清單，逗號
-  分隔（如 `CACJOB,CACVIP,CACATS`）。**只掃這些 project**，不掃 Jira
-  帳號能存取的其他專案——避免跨專案的 `grill-me` label 誤觸發。
 
-執行前用與 `jira-fetch` 相同的方式確認四個變數存在（`${VAR:+set}`
+執行前用與 `jira-fetch` 相同的方式確認三個變數存在（`${VAR:+set}`
 寫法，不要用 skill frontmatter 的 load-time inline shell 檢查，會被權限層
 擋下）：
 
@@ -120,8 +114,6 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 echo "JIRA_TOKEN: ${JIRA_TOKEN:+set}"
 echo "JIRA_EMAIL: ${JIRA_EMAIL:+set}"
 echo "JIRA_BASE_URL: ${JIRA_BASE_URL:+set}"
-echo "JIRA_GRILL_CHANNEL: ${JIRA_GRILL_CHANNEL:+set}"
-echo "JIRA_GRILL_PROJECTS: ${JIRA_GRILL_PROJECTS:+set}"
 ```
 
 任一缺少：說明缺什麼變數並停止，不繼續嘗試。
@@ -133,19 +125,19 @@ Auth，一律用 `node -e` 解析/組 JSON，不假設 `jq`／`python3`／GNU-on
 coreutils 存在。讀票內容與留言一律呼叫 `jira-fetch` skill（`jira-fetch
 <TICKET_ID> --comments 50`），不要自己重寫一份讀取邏輯。
 
-以下三個動作是 `jira-fetch` 沒有的，本 skill 自己實作：
+以下兩個動作是 `jira-fetch` 沒有的，本 skill 自己實作：
 
 ### 改 label
 
 ```bash
-# 範例：把 grill-me 換成 grill-me-active（收斂/中止時把 grill-me-active
-# 換成 grill-me-done，remove/add 的值換掉即可）
+# 範例：把 grill-me-active 換成 grill-me-done（防禦性補做 grill-me →
+# grill-me-active 的認領時，remove/add 的值換掉即可）
 STATUS=$(curl -s -o /dev/null -w '%{http_code}' -u "${JIRA_EMAIL}:${JIRA_TOKEN}" \
   -X PUT "${JIRA_BASE_URL}/rest/api/2/issue/${TICKET_ID}" \
   -H "Content-Type: application/json" \
-  -d '{"update":{"labels":[{"remove":"grill-me"},{"add":"grill-me-active"}]}}')
+  -d '{"update":{"labels":[{"remove":"grill-me-active"},{"add":"grill-me-done"}]}}')
 if [ "$STATUS" != "204" ]; then
-  echo "ERROR: 改 label 失敗（HTTP ${STATUS}），停止處理這張票，留給下次 discovery/poll 重試。"
+  echo "ERROR: 改 label 失敗（HTTP ${STATUS}）。"
 fi
 ```
 
@@ -167,98 +159,45 @@ if [ "$STATUS" != "201" ]; then
 fi
 ```
 
-### JQL 搜尋（只有 discovery 流程用）
-
-```bash
-PROJECTS_CLAUSE=$(node -e '
-const keys = process.env.JIRA_GRILL_PROJECTS.split(",").map(s => s.trim()).filter(Boolean);
-console.log("project IN (" + keys.map(k => JSON.stringify(k)).join(",") + ")");
-')
-JQL="${PROJECTS_CLAUSE} AND labels = \"grill-me\" AND labels != \"grill-me-active\""
-ENCODED_JQL=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$JQL")
-RESPONSE=$(curl -s -u "${JIRA_EMAIL}:${JIRA_TOKEN}" \
-  -w '\n%{http_code}' \
-  "${JIRA_BASE_URL}/rest/api/2/search?jql=${ENCODED_JQL}&fields=key")
-
-printf '%s' "$RESPONSE" | node -e '
-const raw = require("fs").readFileSync(0, "utf8");
-const nl = raw.lastIndexOf("\n");
-const status = raw.slice(nl + 1).trim();
-const body = raw.slice(0, nl);
-if (status !== "200") { console.log("ERROR: JQL 搜尋失敗（HTTP " + status + "）"); process.exit(0); }
-const issues = (JSON.parse(body).issues) || [];
-if (!issues.length) { console.log("(no new tickets)"); process.exit(0); }
-for (const i of issues) console.log(i.key);
-'
-```
-
-沒有搜到任何票 → 印出 `(no new tickets)` 後直接結束，不做任何其他動作
-（no-op，控制成本）。
-
-## 流程一：Discovery（`$ARGUMENTS = discover`）
-
-1. 確認環境變數（含 `JIRA_GRILL_CHANNEL`、`JIRA_GRILL_PROJECTS`）。
-2. 執行上面的 JQL 搜尋，取得所有符合的 `TICKET_ID` 清單。清單為空就結束。
-3. 對每個 `TICKET_ID` 依序：
-   a. 呼叫 `jira-fetch ${TICKET_ID} --comments 50` 取得標題/描述/驗收條件/
-      現有留言。
-   b. 把 label 從 `grill-me` 換成 `grill-me-active`（改 label 失敗 → 跳過
-      這張票，印出錯誤，繼續下一張，不建立 cron job，留給下次 discovery
-      重試）。
-   c. 依「Repo 解析與準備」決定並準備目標 repo（可能成功解析並 clone/
-      fetch，也可能未定、留給第一輪 frontier 去問）。
-   d. 以描述、驗收條件、（若已知）repo 裡查到的程式碼事實為輸入，產出
-      第一輪 frontier 問題（格式見上文「提問格式與簽名標記」；repo 未定
-      時把「哪個 repo」併入這一輪一起問），貼成第一則 comment。
-   e. 用 `openab-schedule` skill 的 `[[jobs]]` TOML 語法（**不要**套用它
-      文件裡「先跟人類確認卡片」那段流程——discovery 是無人在場的自動
-      觸發，人類已經透過核准這份 spec 一次性授權這套自動建立/清理 job
-      的行為），在 `~/.openab/cronjob.toml` 新增：
-      ```toml
-      [[jobs]]
-      id = "jira-grill-<TICKET_ID>"
-      enabled = true
-      schedule = "*/10 * * * *"
-      channel = "<JIRA_GRILL_CHANNEL 的值>"
-      message = "執行 jira-grill skill，參數：ticket <TICKET_ID>"
-      sender_name = "jira-grill-<TICKET_ID>"
-      timezone = "Asia/Taipei"
-      ```
-      repo 已在步驟 c 解析出來的話，`message` 改成
-      `"執行 jira-grill skill，參數：ticket <TICKET_ID> repo=<owner/repo>"`。
-      讀取既有檔案內容、保留其他 job，只新增這一筆（絕不覆蓋整個檔案）。
-4. 全部處理完，不需要額外摘要輸出（discovery thread 本身沒有人在看）。
-
-## 流程二：Per-ticket（`$ARGUMENTS = ticket <TICKET_ID> [repo=<owner/repo>]`）
+## 流程（`$ARGUMENTS = ticket <TICKET_ID>`）
 
 1. 確認環境變數。
 2. 呼叫 `jira-fetch ${TICKET_ID} --comments 50`，取得完整內容（含
    labels、全部留言，留言依 `jira-fetch` 慣例新到舊排序）。
-3. **中止訊號 1（label 被人類改掉）**：若回傳的 labels 不含
-   `grill-me-active`，視為人類已手動中止 → 跳到步驟 8b。
-4. **判斷有沒有新回覆**：看留言區塊最上面（最新）那一則，若含簽名標記
-   `— By Rick (jira-grill)` → 還沒有新回覆 → 直接結束（no-op，這是最
-   常見的情況，輸出盡量精簡以控制成本）。否則有新回覆，繼續步驟 5。
-5. **中止訊號 2（人類文字喊停）**：若這則新回覆明確表達停止意圖（例如
-   「先這樣」「夠了」「不用再問了」「停止」「stop」「that's enough」
-   「no more questions」等同義表達，靠語意判斷、不是精確關鍵字比對）→
-   跳到步驟 8b（人類中止，非自然收斂）。否則繼續步驟 6。
-6. **repo 是否已知**：`$ARGUMENTS` 有帶 `repo=<owner/repo>` 就已知；沒有
-   就檢查這則新回覆有沒有回答「哪個 repo」這一題：
-   - 有回答 → 依「Repo 解析與準備」的準備步驟 clone/fetch 該 repo；讀
-     `~/.openab/cronjob.toml`，把 `id = "jira-grill-<TICKET_ID>"` 這筆
-     的 `message` 改成帶 `repo=<owner/repo>`（其他 job、其他欄位都不動）
-     寫回，之後每輪就不用再解析。
-   - 沒有回答 → repo 仍未定，這一題留在下一步的 frontier 重算裡繼續問。
-   - `$ARGUMENTS` 已帶 `repo=` → 直接 `git fetch`/`pull` 該 repo 保持
-     最新。
-7. 依 grilling 方法論，用完整留言串（含新回覆、含 repo 裡查到的事實）
-   重新計算 design tree：
-   - 還有未決分支（可能包含還沒回答的「哪個 repo」）→ 產出下一輪
-     frontier 問題，貼成新 comment（格式見上文），結尾附「目前還有 N
-     個分支未決」的進度摘要 → 結束（label、cron job 都不動）。
-   - Frontier 已清空（雙方對需求達成共識）→ 跳到步驟 8a。
-8. **收斂/中止收尾**（8a 自然收斂 / 8b 人類中止，兩者都要做完下面全部）：
+3. **重複觸發防護**：看留言區塊最上面（最新）那一則，若含簽名標記
+   `— By Rick (jira-grill)` → 代表這次觸發是 race 造成的重複觸發
+   （`jira-grill-poller` 偵測到變更、但上一輪 turn 尚未完成前又被觸發
+   一次）→ no-op 結束，輸出盡量精簡以控制成本。否則繼續步驟 4。
+4. **防禦性 label 檢查**：
+   - 不含 `grill-me-active` 也不含 `grill-me`（已收斂/已中止/人類手動
+     改過）→ 理論上不該被觸發（poller 的 JQL 只抓這兩種 label），印出
+     警告並結束。
+   - 只含 `grill-me`（poller 的認領 PUT 失敗了）→ 補做 label 轉換
+     （`grill-me` → `grill-me-active`），當首輪繼續處理。
+   - 含 `grill-me-active` → 繼續步驟 5。
+5. **判斷首輪／續輪**：整串留言裡有沒有任何一則帶 Rick 簽名的留言：
+   - 沒有 → **首輪**：依「Repo 解析與準備」決定並準備目標 repo（可能
+     成功解析並 clone/fetch，也可能未定、留給第一輪 frontier 去問），
+     以票的標題、描述、驗收條件與（若已知）repo 裡查到的程式碼事實
+     為輸入，產出第一輪 frontier 問題（格式見上文「提問格式與簽名
+     標記」；repo 未定時把「哪個 repo」併入這一輪一起問），貼成第一則
+     comment。
+   - 有 → **續輪**：
+     a. **中止訊號 1（label 被人類改掉）**：若目前 labels 不含
+        `grill-me-active`，視為人類已手動中止 → 跳到步驟 6b。
+     b. **中止訊號 2（人類文字喊停）**：若最新那則非自己簽名的留言
+        明確表達停止意圖（例如「先這樣」「夠了」「不用再問了」
+        「停止」「stop」「that's enough」「no more questions」等同義
+        表達，靠語意判斷、不是精確關鍵字比對）→ 跳到步驟 6b（人類
+        中止，非自然收斂）。否則繼續。
+     c. 依「Repo 解析與準備」重新走一次優先序，確認/更新目標 repo。
+     d. 依 grilling 方法論，用完整留言串（含新回覆、含 repo 裡查到的
+        事實）重新計算 design tree：
+        - 還有未決分支（可能包含還沒回答的「哪個 repo」）→ 產出下一輪
+          frontier 問題，貼成新 comment（格式見上文），結尾附「目前
+          還有 N 個分支未決」的進度摘要 → 結束。
+        - Frontier 已清空（雙方對需求達成共識）→ 跳到步驟 6a。
+6. **收斂／中止收尾**（6a 自然收斂／6b 人類中止，兩者都要做完下面全部）：
    a. 自然收斂：貼一則「✅ 需求共識」comment，把整輪問答蒸餾成結構化的
       最終需求描述（背景、確認的需求範圍、驗收條件、目標 repo），附簽名。
       人類中止：貼一則「🛑 已中止 grill-me（人類要求停止）」comment，
@@ -267,9 +206,6 @@ for (const i of issues) console.log(i.key);
       `@{reporter 的 displayName} @{assignee 的 displayName}`（純文字，
       不是真正會觸發通知的 Jira `[~accountId]` mention——見「已知限制」）。
    b. 把 label 從 `grill-me-active` 換成 `grill-me-done`。
-   c. 讀 `~/.openab/cronjob.toml`，移除 `id = "jira-grill-<TICKET_ID>"`
-      這個 `[[jobs]]` 區塊（保留其他 job），寫回檔案——這張票不再需要
-      輪詢。
 
 ## 已知限制
 
@@ -278,23 +214,25 @@ for (const i of issues) console.log(i.key);
   表可查，公司任務查不到對應項目、或一個產品對到多個 repo/平台時也一
   樣——一律把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，
   不是失敗。
+- **沒有獨立 Jira bot 身份**：Rick 用人類帳號回覆 Jira，判斷「這則留言
+  是不是自己剛貼的」一律靠文字簽名標記，不是帳號身份——`jira-grill-poller`
+  跟這裡的重複觸發防護都是靠這個機制，改了簽名格式兩邊都會失效。
+- **重複觸發防護是機率性的**：`jira-grill-poller` 沒有分散式鎖，理論上
+  仍存在極窄的競態窗口（poller 判斷完、Discord 訊息送出前，Rick 剛好
+  完成上一輪並貼出新留言），但本 skill 步驟 3 的簽名檢查會在絕大多數
+  情況下擋下重複處理。
 - **收斂/中止通知不是真正的 Jira @mention**：只是純文字寫 reporter/
   assignee 的 displayName，不是會觸發 Jira 通知的 `[~accountId]` 語法。
   實務上 Jira 預設會對「有新留言」通知 reporter/assignee/watcher，這則
   純文字提及只是方便人類在畫面上找到自己，不是通知機制本身。
 - **中止/收斂路徑沒有回頭鍵，但這是可接受的**：把 label 改回 `grill-me`
-  會被下次 discovery 當成全新票重新處理——這是設計上允許的行為，不是
-  bug。
-- **成本隨並行票數線性增加**：每張正在 grill 的票每 10 分鐘觸發一次
-  agent 推理（多數是「沒有新留言→no-op」的低成本輸出），票數一多會累積
-  明顯的 Claude 用量；已知 repo 的票每輪還多一次 `git fetch`，成本略高
-  於純文字問答。
+  會被下次 `jira-grill-poller` 的 Query 1 當成全新票重新處理——這是
+  設計上允許的行為，不是 bug。
 - **`--comments 50` 是硬上限**：單張票的往返超過 50 則留言會讓最早的
   歷史看不到；純粹靠 Jira 留言串本身作為真相來源，理論上仍可能因為超過
   這個上限而遺漏極早期的脈絡，但一輪 grilling 通常遠低於 50 則留言，
   接受此限制。
-- **JQL/label 慣例依賴 Jira 實例設定**：若組織的 label 使用慣例、Jira
-  帳號權限範圍與本設計假設不同，discovery 的 JQL 需要對應調整。
-- **新專案要開放要改部署設定，不是 skill 自己能決定**：`JIRA_GRILL_PROJECTS`
-  是白名單，故意不掃帳號能存取的其他專案，避免跨專案的 `grill-me` label
-  誤觸發；要新增專案得改 Rick 的部署環境變數，不是這個 skill 的職責範圍。
+- **輪詢頻率、掃描的 project 範圍不是本 skill 能決定**：由
+  `jira-grill-poller` 的 K8s CronJob 設定（`schedule`、
+  `JIRA_GRILL_PROJECTS`）決定，見
+  `deployment-guides/k3s/jira-grill-poller/`。
