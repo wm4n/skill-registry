@@ -108,8 +108,11 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 - `JIRA_TOKEN` / `JIRA_EMAIL` / `JIRA_BASE_URL`：同 `jira-fetch` skill。
 - `JIRA_GRILL_CHANNEL`：discovery job 建立 per-ticket cron job 時要用的
   Discord channel ID（Rick 既有頻道）。
+- `JIRA_GRILL_PROJECTS`：discovery 掃描的 Jira project key 清單，逗號
+  分隔（如 `CACJOB,CACVIP,CACATS`）。**只掃這些 project**，不掃 Jira
+  帳號能存取的其他專案——避免跨專案的 `grill-me` label 誤觸發。
 
-執行前用與 `jira-fetch` 相同的方式確認三個 Jira 變數存在（`${VAR:+set}`
+執行前用與 `jira-fetch` 相同的方式確認四個變數存在（`${VAR:+set}`
 寫法，不要用 skill frontmatter 的 load-time inline shell 檢查，會被權限層
 擋下）：
 
@@ -118,6 +121,7 @@ echo "JIRA_TOKEN: ${JIRA_TOKEN:+set}"
 echo "JIRA_EMAIL: ${JIRA_EMAIL:+set}"
 echo "JIRA_BASE_URL: ${JIRA_BASE_URL:+set}"
 echo "JIRA_GRILL_CHANNEL: ${JIRA_GRILL_CHANNEL:+set}"
+echo "JIRA_GRILL_PROJECTS: ${JIRA_GRILL_PROJECTS:+set}"
 ```
 
 任一缺少：說明缺什麼變數並停止，不繼續嘗試。
@@ -166,7 +170,11 @@ fi
 ### JQL 搜尋（只有 discovery 流程用）
 
 ```bash
-JQL='labels = "grill-me" AND labels != "grill-me-active"'
+PROJECTS_CLAUSE=$(node -e '
+const keys = process.env.JIRA_GRILL_PROJECTS.split(",").map(s => s.trim()).filter(Boolean);
+console.log("project IN (" + keys.map(k => JSON.stringify(k)).join(",") + ")");
+')
+JQL="${PROJECTS_CLAUSE} AND labels = \"grill-me\" AND labels != \"grill-me-active\""
 ENCODED_JQL=$(node -e 'console.log(encodeURIComponent(process.argv[1]))' "$JQL")
 RESPONSE=$(curl -s -u "${JIRA_EMAIL}:${JIRA_TOKEN}" \
   -w '\n%{http_code}' \
@@ -189,7 +197,7 @@ for (const i of issues) console.log(i.key);
 
 ## 流程一：Discovery（`$ARGUMENTS = discover`）
 
-1. 確認環境變數（含 `JIRA_GRILL_CHANNEL`）。
+1. 確認環境變數（含 `JIRA_GRILL_CHANNEL`、`JIRA_GRILL_PROJECTS`）。
 2. 執行上面的 JQL 搜尋，取得所有符合的 `TICKET_ID` 清單。清單為空就結束。
 3. 對每個 `TICKET_ID` 依序：
    a. 呼叫 `jira-fetch ${TICKET_ID} --comments 50` 取得標題/描述/驗收條件/
@@ -287,3 +295,6 @@ for (const i of issues) console.log(i.key);
   接受此限制。
 - **JQL/label 慣例依賴 Jira 實例設定**：若組織的 label 使用慣例、Jira
   帳號權限範圍與本設計假設不同，discovery 的 JQL 需要對應調整。
+- **新專案要開放要改部署設定，不是 skill 自己能決定**：`JIRA_GRILL_PROJECTS`
+  是白名單，故意不掃帳號能存取的其他專案，避免跨專案的 `grill-me` label
+  誤觸發；要新增專案得改 Rick 的部署環境變數，不是這個 skill 的職責範圍。
