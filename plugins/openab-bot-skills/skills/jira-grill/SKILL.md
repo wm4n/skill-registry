@@ -1,12 +1,12 @@
 ---
 name: jira-grill
-argument-hint: "discover | ticket <JIRA-ticket-id>"
+argument-hint: "discover | ticket <JIRA-ticket-id> [repo=<owner/repo>]"
 description: >-
   Jira grill-me 需求審視。由 discovery/per-ticket cron job 觸發（不是
-  @mention、不在 Discord 對話）：票貼 grill-me label 後在 Jira comment 上
-  用 grilling 式連續追問（design tree/frontier，見
-  mattpocock-skills:grilling），收斂或人類喊停後只貼結論通知人類，不自動
-  開發、不交棒。獨立於三 bot 接力 pipeline。
+  @mention、不在 Discord 對話）：票貼 grill-me label 後，先解析並準備好
+  對應的 GitHub repo，再在 Jira comment 上用 grilling 式連續追問（design
+  tree/frontier，見 mattpocock-skills:grilling），收斂或人類喊停後只貼
+  結論通知人類，不自動開發、不交棒。獨立於三 bot 接力 pipeline。
 ---
 
 # Jira Grill
@@ -18,8 +18,46 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 
 - `discover`：由固定的 discovery cron job 呼叫，找出新貼 `grill-me` label
   的票並啟動它們。
-- `ticket <TICKET_ID>`：由該票專屬的 cron job 呼叫，檢查這張票是否有新回覆
-  並推進下一輪。
+- `ticket <TICKET_ID> [repo=<owner/repo>]`：由該票專屬的 cron job 呼叫，
+  檢查這張票是否有新回覆並推進下一輪；`repo=` 有帶就是已知的目標
+  repo（見下）。
+
+## Repo 解析與準備
+
+產出第一輪問題前，先確定這個需求要動到哪個 repo、把它準備好——grilling
+要根據實際程式碼提問，不是憑空對需求文字發問。
+
+**解析優先序**（比照 `requirement-analysis` skill，少了即時人類對話這個
+管道）：
+
+1. Jira 票的欄位（描述、custom field）裡有明確的 `owner/repo` 或 GitHub
+   URL → 直接用。
+2. 依 JIRA project key 查產品對照表：
+   ```bash
+   gh auth switch --hostname github.com --user cac-william
+   gh api repos/104corp/cac-ai-rules/contents/product-repo-map.md --jq '.content' | base64 -d
+   ```
+   從對照表找 project key 對應的 repo。
+3. 都找不到 → **repo 未定**。把「這個需求要動到哪個 repo？」併入第一輪
+   frontier（跟其他問題貼在同一則 comment），當成一般 frontier 問題處理，
+   不是特殊流程，等 Jira 回覆。
+
+**repo 一旦確定，立刻準備**（比照 Rick 的「開工前準備」SOP）：
+
+1. 用 `repo-identity` skill 依 owner 選 GitHub 帳號、`gh auth switch`。
+2. Base clone 固定在 `/home/node/repos/<owner>/<repo>`：不存在就 clone，
+   存在就 `git fetch`/`pull` 到最新。**只在 base clone 上讀，不建
+   worktree**——這裡不改檔案、不切分支，不落入「repo 相關工作一律用
+   worktree」那條鐵則要管的範圍。
+3. 讀該 repo 的 `CLAUDE.md`/`AGENTS.md`、相關程式碼與既有實作，把查得到
+   的事實（檔案結構、既有慣例、技術限制）寫進問題內容。你自己查得到的
+   事實不該變成丟給人類的問題，只有真正的決策才問人類。
+
+**discovery 建立 per-ticket cron job 時**，把已解析出的 repo 一併寫進
+`message`（`執行 jira-grill skill，參數：ticket <TICKET_ID> repo=
+<owner/repo>`），之後每輪直接讀這個值、只做 `git fetch`/`pull`，不用
+重跑解析。若當時還沒解析出來，`message` 不帶 `repo=`，流程二會在拿到
+回覆後自己補上（見流程二 步驟 6）。
 
 ## 提問格式與簽名標記
 
@@ -45,8 +83,9 @@ Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留
 — By Rick (jira-grill)
 ```
 
-第一輪（剛偵測到 `grill-me`、還沒有任何回覆）以票的標題、描述、驗收條件為
-輸入直接產出 frontier，不要等留言。
+第一輪（剛偵測到 `grill-me`、還沒有任何回覆）以票的標題、描述、驗收條件
+與「Repo 解析與準備」查到的程式碼事實為輸入直接產出 frontier，不要等
+留言。
 
 **簽名是機器可辨識標記，不是裝飾**：結尾固定 `— By Rick (jira-grill)`
 （不是 persona 其他情境用的 `— By Rick`）。流程二靠這串文字判斷「留言區塊
@@ -147,9 +186,12 @@ for (const i of issues) console.log(i.key);
    b. 把 label 從 `grill-me` 換成 `grill-me-active`（改 label 失敗 → 跳過
       這張票，印出錯誤，繼續下一張，不建立 cron job，留給下次 discovery
       重試）。
-   c. 以描述+驗收條件為輸入，產出第一輪 frontier 問題（格式見上文「提問
-      格式與簽名標記」），貼成第一則 comment。
-   d. 用 `openab-schedule` skill 的 `[[jobs]]` TOML 語法（**不要**套用它
+   c. 依「Repo 解析與準備」決定並準備目標 repo（可能成功解析並 clone/
+      fetch，也可能未定、留給第一輪 frontier 去問）。
+   d. 以描述、驗收條件、（若已知）repo 裡查到的程式碼事實為輸入，產出
+      第一輪 frontier 問題（格式見上文「提問格式與簽名標記」；repo 未定
+      時把「哪個 repo」併入這一輪一起問），貼成第一則 comment。
+   e. 用 `openab-schedule` skill 的 `[[jobs]]` TOML 語法（**不要**套用它
       文件裡「先跟人類確認卡片」那段流程——discovery 是無人在場的自動
       觸發，人類已經透過核准這份 spec 一次性授權這套自動建立/清理 job
       的行為），在 `~/.openab/cronjob.toml` 新增：
@@ -163,31 +205,43 @@ for (const i of issues) console.log(i.key);
       sender_name = "jira-grill-<TICKET_ID>"
       timezone = "Asia/Taipei"
       ```
+      repo 已在步驟 c 解析出來的話，`message` 改成
+      `"執行 jira-grill skill，參數：ticket <TICKET_ID> repo=<owner/repo>"`。
       讀取既有檔案內容、保留其他 job，只新增這一筆（絕不覆蓋整個檔案）。
 4. 全部處理完，不需要額外摘要輸出（discovery thread 本身沒有人在看）。
 
-## 流程二：Per-ticket（`$ARGUMENTS = ticket <TICKET_ID>`）
+## 流程二：Per-ticket（`$ARGUMENTS = ticket <TICKET_ID> [repo=<owner/repo>]`）
 
 1. 確認環境變數。
 2. 呼叫 `jira-fetch ${TICKET_ID} --comments 50`，取得完整內容（含
    labels、全部留言，留言依 `jira-fetch` 慣例新到舊排序）。
 3. **中止訊號 1（label 被人類改掉）**：若回傳的 labels 不含
-   `grill-me-active`，視為人類已手動中止 → 跳到步驟 6b。
+   `grill-me-active`，視為人類已手動中止 → 跳到步驟 8b。
 4. **判斷有沒有新回覆**：看留言區塊最上面（最新）那一則，若含簽名標記
    `— By Rick (jira-grill)` → 還沒有新回覆 → 直接結束（no-op，這是最
    常見的情況，輸出盡量精簡以控制成本）。否則有新回覆，繼續步驟 5。
 5. **中止訊號 2（人類文字喊停）**：若這則新回覆明確表達停止意圖（例如
    「先這樣」「夠了」「不用再問了」「停止」「stop」「that's enough」
    「no more questions」等同義表達，靠語意判斷、不是精確關鍵字比對）→
-   跳到步驟 6b（人類中止，非自然收斂）。否則視為對上一輪 frontier 的
-   回答，用完整留言串重新計算 design tree：
-   - 還有未決分支 → 產出下一輪 frontier 問題，貼成新 comment（格式見
-     上文），結尾附「目前還有 N 個分支未決」的進度摘要 → 結束（label、
-     cron job 都不動）。
-   - Frontier 已清空（雙方對需求達成共識）→ 跳到步驟 6a。
-6. **收斂/中止收尾**（6a 自然收斂 / 6b 人類中止，兩者都要做完下面全部）：
+   跳到步驟 8b（人類中止，非自然收斂）。否則繼續步驟 6。
+6. **repo 是否已知**：`$ARGUMENTS` 有帶 `repo=<owner/repo>` 就已知；沒有
+   就檢查這則新回覆有沒有回答「哪個 repo」這一題：
+   - 有回答 → 依「Repo 解析與準備」的準備步驟 clone/fetch 該 repo；讀
+     `~/.openab/cronjob.toml`，把 `id = "jira-grill-<TICKET_ID>"` 這筆
+     的 `message` 改成帶 `repo=<owner/repo>`（其他 job、其他欄位都不動）
+     寫回，之後每輪就不用再解析。
+   - 沒有回答 → repo 仍未定，這一題留在下一步的 frontier 重算裡繼續問。
+   - `$ARGUMENTS` 已帶 `repo=` → 直接 `git fetch`/`pull` 該 repo 保持
+     最新。
+7. 依 grilling 方法論，用完整留言串（含新回覆、含 repo 裡查到的事實）
+   重新計算 design tree：
+   - 還有未決分支（可能包含還沒回答的「哪個 repo」）→ 產出下一輪
+     frontier 問題，貼成新 comment（格式見上文），結尾附「目前還有 N
+     個分支未決」的進度摘要 → 結束（label、cron job 都不動）。
+   - Frontier 已清空（雙方對需求達成共識）→ 跳到步驟 8a。
+8. **收斂/中止收尾**（8a 自然收斂 / 8b 人類中止，兩者都要做完下面全部）：
    a. 自然收斂：貼一則「✅ 需求共識」comment，把整輪問答蒸餾成結構化的
-      最終需求描述（背景、確認的需求範圍、驗收條件），附簽名。
+      最終需求描述（背景、確認的需求範圍、驗收條件、目標 repo），附簽名。
       人類中止：貼一則「🛑 已中止 grill-me（人類要求停止）」comment，
       簡述目前已釐清到哪裡、還有哪些分支未決，附簽名。
       兩者都在文末加一行 plain-text 提及
@@ -200,6 +254,9 @@ for (const i of issues) console.log(i.key);
 
 ## 已知限制
 
+- **repo 解析只涵蓋現有慣例**：104corp 任務靠 `product-repo-map.md`；
+  wm4n 個人任務沒有對照表可查，公司任務查不到對照表項目時也一樣——一律
+  把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，不是失敗。
 - **收斂/中止通知不是真正的 Jira @mention**：只是純文字寫 reporter/
   assignee 的 displayName，不是會觸發 Jira 通知的 `[~accountId]` 語法。
   實務上 Jira 預設會對「有新留言」通知 reporter/assignee/watcher，這則
@@ -209,7 +266,8 @@ for (const i of issues) console.log(i.key);
   bug。
 - **成本隨並行票數線性增加**：每張正在 grill 的票每 10 分鐘觸發一次
   agent 推理（多數是「沒有新留言→no-op」的低成本輸出），票數一多會累積
-  明顯的 Claude 用量。
+  明顯的 Claude 用量；已知 repo 的票每輪還多一次 `git fetch`，成本略高
+  於純文字問答。
 - **`--comments 50` 是硬上限**：單張票的往返超過 50 則留言會讓最早的
   歷史看不到；純粹靠 Jira 留言串本身作為真相來源，理論上仍可能因為超過
   這個上限而遺漏極早期的脈絡，但一輪 grilling 通常遠低於 50 則留言，
