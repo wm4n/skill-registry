@@ -58,7 +58,12 @@ K8s CronJob，見 `deployment-guides/k3s/jira-grill-poller/`）判斷這張票
 
 **repo 一旦確定，立刻準備**（比照 Rick 的「開工前準備」SOP）：
 
-1. 用 `repo-identity` skill 依 owner 選 GitHub 帳號、`gh auth switch`。
+1. **帳號選擇（persona 優先）**：先看目前執行的 persona
+   （`{home}/CLAUDE.md`/`AGENTS.md`）有沒有為這個 repo owner 定義**固定
+   帳號規則**（例如 Genie 的「104corp 固定用 104cac 帳號」）——有就直接
+   套用、`gh auth switch` 到該帳號，不呼叫 `repo-identity`；沒有固定
+   規則可套用，才用 `repo-identity` skill 依 owner 選帳號（Rick/Morty
+   現行方式不變）。
 2. Base clone 固定在 `/home/node/repos/<owner>/<repo>`：不存在就 clone，
    存在就 `git fetch`/`pull` 到最新。**只在 base clone 上讀，不建
    worktree**——這裡不改檔案、不切分支，不落入「repo 相關工作一律用
@@ -122,7 +127,7 @@ comment：
 ---
 目前還有 {N} 個規格分支未決。
 
-— By Rick (jira-grill)
+— By {執行的 bot 名稱}（jira-grill）
 ```
 
 （工程階段把「規格分支」換成「工程分支」即可，其餘格式不變。）
@@ -140,17 +145,20 @@ comment：
 ---
 目前還有 {N} 個工程分支未決。
 
-— By Rick (jira-grill)
+— By {執行的 bot 名稱}（jira-grill）
 ```
 
 第一輪（剛偵測到 `grill-me`、還沒有任何回覆）永遠從規格階段開始，以票的
 標題、描述、驗收條件與「Repo 解析與準備」查到的程式碼事實為輸入直接產出
 規格類 frontier，不要等留言。
 
-**簽名是機器可辨識標記，不是裝飾**：結尾固定 `— By Rick (jira-grill)`
-（不是 persona 其他情境用的 `— By Rick`）。`jira-grill-poller` 跟下方
-流程步驟 3 都靠這串文字判斷「留言區塊最上面那則是不是自己剛貼的」。改了
-格式，兩邊的判斷都會失效，導致同一輪問題重複問或漏判新回覆。
+**簽名是機器可辨識標記，不是裝飾**：結尾固定 `— By {執行的 bot 名稱}
+（jira-grill）`（不是 persona 其他情境用的 `— By {bot 名稱}`），依實際
+執行本 skill 的 bot 代入自己的名稱（Rick 執行時寫 `Rick`、Genie 執行時
+寫 `Genie`）。`jira-grill-poller` 跟下方流程步驟 3 都靠這串文字判斷
+「留言區塊最上面那則是不是自己剛貼的」——比對的是**自己的**名稱，不是
+固定比對 `Rick`。改了格式，兩邊的判斷都會失效，導致同一輪問題重複問或
+漏判新回覆。
 
 ## 環境變數
 
@@ -214,10 +222,11 @@ fi
 1. 確認環境變數。
 2. 呼叫 `jira-fetch ${TICKET_ID} --comments 50`，取得完整內容（含
    labels、全部留言，留言依 `jira-fetch` 慣例新到舊排序）。
-3. **重複觸發防護**：看留言區塊最上面（最新）那一則，若含簽名標記
-   `— By Rick (jira-grill)` → 代表這次觸發是 race 造成的重複觸發
-   （`jira-grill-poller` 偵測到變更、但上一輪 turn 尚未完成前又被觸發
-   一次）→ no-op 結束，輸出盡量精簡以控制成本。否則繼續步驟 4。
+3. **重複觸發防護**：看留言區塊最上面（最新）那一則，若含**自己**（當前
+   執行本 skill 的 bot）的簽名標記 `— By {自己的名稱}（jira-grill）` →
+   代表這次觸發是 race 造成的重複觸發（觸發來源偵測到變更、但上一輪
+   turn 尚未完成前又被觸發一次）→ no-op 結束，輸出盡量精簡以控制成本。
+   否則繼續步驟 4。
 4. **防禦性 label 檢查**：
    - 不含 `grill-me-active` 也不含 `grill-me`（已收斂/已中止/人類手動
      改過）→ 理論上不該被觸發（poller 的 JQL 只抓這兩種 label），印出
@@ -225,7 +234,10 @@ fi
    - 只含 `grill-me`（poller 的認領 PUT 失敗了）→ 補做 label 轉換
      （`grill-me` → `grill-me-active`），當首輪繼續處理。
    - 含 `grill-me-active` → 繼續步驟 5。
-5. **判斷首輪／續輪**：整串留言裡有沒有任何一則帶 Rick 簽名的留言：
+5. **判斷首輪／續輪**：整串留言裡有沒有任何一則帶 jira-grill 簽名格式
+   `— By ○○（jira-grill）` 的留言（**不限定哪個 bot 名稱**——這裡問的是
+   「這張票是否已經開始 grilling」，不是「是不是我自己貼的」，跟步驟 3
+   的自我比對不同）：
    - 沒有 → **首輪**：依「Repo 解析與準備」決定並準備目標 repo（可能
      成功解析並 clone/fetch，也可能未定、留給第一輪 frontier 去問——
      「哪個 repo」歸類為規格類問題，見「分階段提問」），以票的標題、
@@ -274,7 +286,8 @@ fi
   表可查，公司任務查不到對應項目、或一個產品對到多個 repo/平台時也一
   樣——一律把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，
   不是失敗。
-- **沒有獨立 Jira bot 身份**：Rick 用人類帳號回覆 Jira，判斷「這則留言
+- **沒有獨立 Jira bot 身份**：各 bot 都用人類/團隊帳號回覆 Jira（Rick/
+  Morty 依 `repo-identity` 切換、Genie 固定用 104cac），判斷「這則留言
   是不是自己剛貼的」一律靠文字簽名標記，不是帳號身份——`jira-grill-poller`
   跟這裡的重複觸發防護都是靠這個機制，改了簽名格式兩邊都會失效。
 - **重複觸發防護是機率性的**：`jira-grill-poller` 沒有分散式鎖，理論上
@@ -302,3 +315,9 @@ fi
 - **規格→工程的階段閘門只擋一次，不會走回頭路**：工程階段才發現的
   規格類新問題直接當一般 frontier 問題問掉，不會強制退回規格階段重新
   走一次全局閘門——這是設計上的正常路徑，不是 bug。
+- **本 skill 由多個 bot 共用（Rick、Genie），一張票理論上可能被兩隻
+  bot 交錯處理**：例如人類手動請 Genie 對一張票跑一輪，之後這張票又被
+  `jira-grill-poller`（預設目標 Rick）偵測到有新回覆而觸發 Rick——兩隻
+  bot 各自依「自己的簽名」判斷要不要處理（見步驟 3），不會重複回答
+  同一輪，但留言串裡會混雜兩種簽名，人類閱讀時需要自己分辨是哪隻 bot
+  回的。
