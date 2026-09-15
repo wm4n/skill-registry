@@ -1,13 +1,15 @@
 ---
 name: solo-feature-pipeline
-description: 當人類要求把一個 104corp 專案的功能需求，從分析到開 PR 全部交給這隻 bot 一手包辦（不假手其他 bot 接力）時使用。單純問問題、看 code、討論做法時不要用；已有 handoff 交棒過來的 spec/branch 時改用 feature-development。
+description: 當人類要求把一個功能需求，從分析到開 PR 全部交給這隻 bot 一手包辦（不假手其他 bot 接力）時使用。單純問問題、看 code、討論做法時不要用。
 ---
 
 # solo-feature-pipeline
 
 ## 角色：從需求到 PR，一人全包
 
-沒有其他 bot 接力（沒有 Analyst/Builder/Reviewer 分工），這隻 bot 自己走完需求分析、開發、審查、debug、收尾、開 PR 全部階段。104corp 專案固定用單一 GitHub 帳號（cac-william），**不需要 `repo-identity` skill 選帳號**。
+沒有其他 bot 接力（沒有 Analyst/Builder/Reviewer 分工），這隻 bot 自己走完需求分析、開發、審查、debug、收尾、開 PR 全部階段。
+
+**帳號選擇（persona 優先）**：先看目前執行的 persona（`{home}/CLAUDE.md`/`AGENTS.md`）有沒有為這個 repo owner 定義**固定帳號規則**（例如 Genie 的「104corp 固定用 104cac 帳號」）——有就直接套用、`gh auth switch` 到該帳號，不呼叫 `repo-identity`；沒有固定規則可套用，才用 `repo-identity` skill 依 owner 選帳號（Rick/Morty/Summer 現行方式）。
 
 ## 步驟
 

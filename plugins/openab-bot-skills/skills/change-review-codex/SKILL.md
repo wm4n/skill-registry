@@ -1,13 +1,13 @@
 ---
 name: change-review-codex
-description: 當收到 Builder 交棒的 PR URL 或新 push，或人類明確要求正式 code review 時使用。單純問問題、討論做法時不要用。
+description: 當人類明確要求正式 review 某個 PR 時使用。單純問問題、討論做法時不要用。
 ---
 
 # change-review-codex
 
 > 註：`change-review-codex` 目錄名暫分開，待 rollout 確認 Codex skill 載入格式後可合併回 `change-review`（見 spec §7.1、§9）。
 
-## 觸發：Builder @你、帶一個 PR URL
+## 觸發：人類 @你、帶一個 PR URL
 
 收到 @mention 後先檢查：訊息裡有 PR URL 或明確的新 push（SHA）才啟動 review；
 若只是狀態確認、ACK 或沒有內容的裸 mention → 不啟動 review、不回覆或最多回一句，絕不帶任何 @mention。
@@ -21,10 +21,12 @@ description: 當收到 Builder 交棒的 PR URL 或新 push，或人類明確要
 
 依照 skill 指示完整審查 PR，以 inline COMMENT 形式把發現貼到 PR（不要用 GitHub Approve）。
 
-### 步驟 3：回報 Builder（環境變數 `$HANDOFF_BUILDER` 的值，原樣貼上）
+### 步驟 3：在發起這次 review 的同一條 thread 回覆結論
 
-- 有問題：`$HANDOFF_BUILDER changes requested:<重點清單>,PR=<URL>`
-- 沒問題：`$HANDOFF_BUILDER clean — ready to merge,PR=<URL>`
+不 @mention 任何 bot：
+
+- 有問題：條列重點 finding，附 PR 連結。
+- 沒問題：一句話說明沒有 blocking 問題（ready to merge），附 PR 連結。
 
 ## 鐵則
 
