@@ -1,37 +1,67 @@
 ---
 name: jira-grill
-argument-hint: "ticket <JIRA-ticket-id>"
+argument-hint: "ticket <JIRA-ticket-id> | github-issue <owner/repo#N>"
 description: >-
-  Jira grill-me 需求審視。由獨立部署的 jira-grill-poller（K8s CronJob，
-  不含 LLM）偵測到新票或人類新回覆後，用專用的 jira-grill-trigger bot
-  @mention 觸發（不是人類 @mention、不在一般 Discord 對話）：先解析並準備
-  好對應的 GitHub repo，再在 Jira comment 上用 grilling 式連續追問（design
-  tree/frontier，見 mattpocock-skills:grilling）——先問完規格類問題、
-  達成規格共識後才問工程類問題，避免同一輪同時驚動 PM 與工程師，收斂或
-  人類喊停後只貼結論通知人類，不自動開發、不交棒。獨立於三 bot 接力
-  pipeline。
+  grill-me 需求審視，支援 Jira 票與 GitHub issue 兩種來源。由獨立部署的
+  grill-poller（K8s CronJob，不含 LLM）偵測到新目標或人類新回覆後，用專用的
+  jira-grill-trigger bot @mention 觸發（不是人類 @mention、不在一般 Discord
+  對話）：先解析並準備好對應的 GitHub repo，再在該票證的留言串上用 grilling
+  式連續追問（design tree/frontier，見 mattpocock-skills:grilling）——先問完
+  規格類問題、達成規格共識後才問工程類問題，避免同一輪同時驚動 PM 與工程師，
+  收斂或人類喊停後只貼結論通知人類，不自動開發、不交棒。
 ---
 
 # Jira Grill
 
-Jira 是唯一真相來源：每次執行都重新從 Jira 撈完整內容與留言判斷目前進度，
-不依賴 session 記憶本身的正確性。
+> **skill 名稱與簽名裡的 `jira-grill` 是沿革，不代表只支援 Jira。** 改名要
+>同時動兩隻 bot 的 persona、plugin 版本與 poller 的簽名比對字串，churn 大於
+> 收益，所以刻意保留。
+
+**來源票證是唯一真相來源**：每次執行都重新從來源（Jira 票或 GitHub issue）撈
+完整內容與留言判斷目前進度，不依賴 session 記憶本身的正確性。
+
+## 兩種來源的對照
+
+除了下表這幾格，**其餘所有邏輯完全相同**——分階段提問、frontier 計算、簽名
+格式、收斂/中止的判斷都不分來源。
+
+| | Jira | GitHub issue |
+| --- | --- | --- |
+| `$ARGUMENTS` | `ticket CACJOB-123` | `github-issue wm4n/chainbreak#42` |
+| 讀內容與留言 | `jira-fetch <ID> --comments 50` | `gh issue view`（見「GitHub API 慣例」） |
+| 貼留言 | Jira REST API | `gh issue comment` |
+| 改 label | Jira REST API（單一 PUT，原子） | `gh issue edit`（加/移除兩個動作） |
+| 目標 repo | 要解析（見「Repo 解析與準備」） | **不用解析——參數裡就是** |
+| 憑證 | `JIRA_TOKEN`/`JIRA_EMAIL`/`JIRA_BASE_URL` | bot 自己已登入的 `gh`（不需要額外環境變數） |
+| 收尾提及人類 | 純文字 displayName（Jira 需要 accountId 才會通知） | 真正的 `@login`（GitHub 會實際通知） |
 
 ## 觸發方式（`$ARGUMENTS`）
 
-`ticket <TICKET_ID>`：由獨立部署的 `jira-grill-poller`（deterministic
-K8s CronJob，見 `deployment-guides/k3s/jira-grill-poller/`）判斷這張票
-需要處理後，用 `jira-grill-trigger` bot 貼出這個指令觸發。poller 已經
-確認過這是真的新票或真的有新回覆，這裡不用再自己判斷要不要處理——只有
-一個輕量防護例外，見下方流程步驟 3「重複觸發防護」。
+兩種形狀，都由獨立部署的 `grill-poller`（deterministic K8s CronJob，見
+`deployment-guides/k3s/grill-poller/`）判斷該目標需要處理後，用
+`jira-grill-trigger` bot 貼出指令觸發：
+
+- `ticket <TICKET_ID>` —— Jira 票，例如 `ticket CACJOB-123`
+- `github-issue <owner/repo#N>` —— GitHub issue，例如
+  `github-issue wm4n/chainbreak#42`
+
+poller 已經確認過這是真的新目標或真的有新回覆，這裡不用再自己判斷要不要
+處理——只有一個輕量防護例外，見下方流程步驟 3「重複觸發防護」。
+
+**第一步永遠是依 `$ARGUMENTS` 的前綴判定來源**，後續每個涉及讀寫票證的動作
+都依這個判定分流。參數形狀不符上述兩種 → 說明並停止，不要臆測。
 
 ## Repo 解析與準備
 
 產出第一輪問題前，先確定這個需求要動到哪個 repo、把它準備好——grilling
 要根據實際程式碼提問，不是憑空對需求文字發問。
 
-**解析優先序**（比照 `requirement-analysis` skill，少了即時人類對話這個
-管道）：
+> **GitHub 來源直接跳過解析**：`github-issue <owner/repo#N>` 的參數裡就是
+> repo，不必也不該再去查登錄表——直接進下方「repo 一旦確定，立刻準備」。
+> 下面整段解析優先序**只適用 Jira 來源**。
+
+**解析優先序**（Jira 來源專用；比照 `requirement-analysis` skill，少了即時
+人類對話這個管道）：
 
 1. Jira 票的欄位（描述、custom field）裡有明確的 `owner/repo` 或 GitHub
    URL → 直接用。
@@ -74,7 +104,8 @@ K8s CronJob，見 `deployment-guides/k3s/jira-grill-poller/`）判斷這張票
 
 **每一輪都重新走一次這個優先序**（不快取解析結果）：解析成本本身很低，
 重算比維護快取簡單——沒有 per-ticket cron job 的 message 可以拿來存
-`repo=` 這種狀態了。
+`repo=` 這種狀態了。（GitHub 來源每輪也一樣從 `$ARGUMENTS` 重新取得 repo，
+零成本。）
 
 ## 分階段提問：規格先、工程後
 
@@ -156,12 +187,14 @@ comment：
 `— By {執行的 bot 名稱} (jira-grill)`（不是 persona 其他情境用的
 `— By {bot 名稱}`），依實際
 執行本 skill 的 bot 代入自己的名稱（Rick 執行時寫 `Rick`、Genie 執行時
-寫 `Genie`）。`jira-grill-poller` 跟下方流程步驟 3 都靠這串文字判斷
+寫 `Genie`）。`grill-poller` 跟下方流程步驟 3 都靠這串文字判斷
 「留言區塊最上面那則是不是自己剛貼的」——比對的是**自己的**名稱，不是
 固定比對 `Rick`。改了格式，兩邊的判斷都會失效，導致同一輪問題重複問或
 漏判新回覆。
 
-## 環境變數
+## 環境變數／憑證（依來源分流）
+
+### Jira 來源
 
 - `JIRA_TOKEN` / `JIRA_EMAIL` / `JIRA_BASE_URL`：同 `jira-fetch` skill。
 
@@ -176,6 +209,22 @@ echo "JIRA_BASE_URL: ${JIRA_BASE_URL:+set}"
 ```
 
 任一缺少：說明缺什麼變數並停止，不繼續嘗試。
+
+### GitHub 來源
+
+**不需要任何 JIRA_\* 變數**，也不需要額外的 token 環境變數——用 bot 自己已經
+登入的 `gh`（帳號選擇見「Repo 解析與準備」的「帳號選擇（persona 優先）」）。
+
+執行前確認目前帳號對該 repo 有 **issue 留言權限**：
+
+```bash
+gh auth status
+gh api "repos/<owner>/<repo>" --jq '.permissions' 2>/dev/null || echo "NO_ACCESS"
+```
+
+⚠️ **這是最容易卡住的地方**：能讀 issue ≠ 能留言。若 bot 的 PAT 沒有
+`Issues: Read and write`，前面的分析全部會做完、最後貼留言那一步才失敗，白燒
+一整輪。**發現沒有權限就立刻停止並明講缺什麼**，不要先做完分析再撞牆。
 
 ## Jira API 慣例
 
@@ -218,22 +267,61 @@ if [ "$STATUS" != "201" ]; then
 fi
 ```
 
-## 流程（`$ARGUMENTS = ticket <TICKET_ID>`）
+## GitHub API 慣例
 
-1. 確認環境變數。
-2. 呼叫 `jira-fetch ${TICKET_ID} --comments 50`，取得完整內容（含
-   labels、全部留言，留言依 `jira-fetch` 慣例新到舊排序）。
-3. **重複觸發防護**：看留言區塊最上面（最新）那一則，若含**自己**（當前
-   執行本 skill 的 bot）的簽名標記 `— By {自己的名稱} (jira-grill)` →
-   代表這次觸發是 race 造成的重複觸發（觸發來源偵測到變更、但上一輪
-   turn 尚未完成前又被觸發一次）→ no-op 結束，輸出盡量精簡以控制成本。
-   否則繼續步驟 4。
-4. **防禦性 label 檢查**：
+一律用 `gh` CLI，不自己拼 REST 呼叫——`gh` 已經處理好認證與分頁。以下用
+`ISSUE_REF` 代表 `owner/repo#N` 這種完整參照，`gh` 各子指令都吃這個形式。
+
+### 讀內容與留言
+
+取代 Jira 那邊的 `jira-fetch`。**留言依 `gh` 慣例是舊到新排序，跟 `jira-fetch`
+的新到舊相反**——判斷「最新一則」時要取陣列的**最後一個**，這是兩種來源之間
+最容易寫反的地方：
+
+```bash
+gh issue view "$ISSUE_REF" --json number,title,body,labels,author,assignees,comments
+```
+
+### 貼 comment
+
+```bash
+# COMMENT_BODY 是要貼的完整文字（含結尾簽名，見上方「提問格式與簽名標記」）
+gh issue comment "$ISSUE_REF" --body "$COMMENT_BODY"
+```
+
+### 改 label
+
+Jira 用單一 PUT 同時 remove + add（原子）；GitHub 沒有等價操作，要兩個動作。
+**順序固定先加後移除**：中間失敗會留下同時帶兩個 label 的可偵測狀態，反過來
+寫則會兩個 label 都沒有、這張 issue 從此沒有任何 poller 撿得到：
+
+```bash
+gh issue edit "$ISSUE_REF" --add-label grill-me-done
+gh issue edit "$ISSUE_REF" --remove-label grill-me-active
+```
+
+## 流程（來源中立；`$ARGUMENTS` 為 `ticket <TICKET_ID>` 或 `github-issue <owner/repo#N>`）
+
+0. **判定來源**：依 `$ARGUMENTS` 前綴分流（`ticket` → Jira、`github-issue`
+   → GitHub）。兩者皆非 → 說明並停止。之後每個讀寫票證的動作都照這個判定
+   選用對應的 API 慣例。
+1. 確認該來源需要的環境變數／憑證（見「環境變數／憑證（依來源分流）」）。
+2. 取得完整內容（含 labels、全部留言）：
+   - **Jira**：`jira-fetch ${TICKET_ID} --comments 50`（留言新到舊排序）
+   - **GitHub**：`gh issue view "$ISSUE_REF" --json …`（留言**舊到新**排序）
+3. **重複觸發防護**：看**最新**那一則留言（⚠️ Jira 是陣列第一個、GitHub 是
+   最後一個，兩邊相反），若含**自己**（當前執行本 skill 的 bot）的簽名標記
+   `— By {自己的名稱} (jira-grill)` → 代表這次觸發是 race 造成的重複觸發
+   （觸發來源偵測到變更、但上一輪 turn 尚未完成前又被觸發一次）→ no-op
+   結束，輸出盡量精簡以控制成本。否則繼續步驟 4。
+4. **防禦性 label 檢查**（兩種來源的 label 名稱完全相同）：
    - 不含 `grill-me-active` 也不含 `grill-me`（已收斂/已中止/人類手動
-     改過）→ 理論上不該被觸發（poller 的 JQL 只抓這兩種 label），印出
-     警告並結束。
-   - 只含 `grill-me`（poller 的認領 PUT 失敗了）→ 補做 label 轉換
-     （`grill-me` → `grill-me-active`），當首輪繼續處理。
+     改過）→ 理論上不該被觸發（poller 只抓這兩種 label），印出警告並結束。
+   - 只含 `grill-me`（poller 的認領失敗了）→ 補做 label 轉換
+     （`grill-me` → `grill-me-active`，依來源用對應的改 label 方式），
+     當首輪繼續處理。
+   - **同時含兩者**（只可能發生在 GitHub：認領的「先加後移除」做到一半
+     失敗）→ 補做移除 `grill-me`，當首輪繼續處理。
    - 含 `grill-me-active` → 繼續步驟 5。
 5. **判斷首輪／續輪**：整串留言裡有沒有任何一則帶 jira-grill 簽名格式
    `— By ○○ (jira-grill)` 的留言（**不限定哪個 bot 名稱**——這裡問的是
@@ -275,50 +363,60 @@ fi
       的需求範圍、驗收條件、目標 repo），附簽名。
       人類中止：貼一則「🛑 已中止 grill-me（人類要求停止）」comment，
       簡述目前已釐清到哪裡、還有哪些分支未決，附簽名。
-      兩者都在文末加一行 plain-text 提及
-      `@{reporter 的 displayName} @{assignee 的 displayName}`（純文字，
-      不是真正會觸發通知的 Jira `[~accountId]` mention——見「已知限制」）。
-   b. 把 label 從 `grill-me-active` 換成 `grill-me-done`。
+      兩者都要在文末加一行提及相關人類，**依來源不同**：
+      - **Jira**：plain-text 的
+        `@{reporter 的 displayName} @{assignee 的 displayName}`（純文字，
+        不是真正會觸發通知的 `[~accountId]` mention——見「已知限制」）。
+      - **GitHub**：真正的 `@{author 的 login}`（以及 assignees 的 login，
+        若有）。GitHub 的 `@login` 會實際發通知，不需要像 Jira 那樣退而
+        求其次。
+   b. 把 label 從 `grill-me-active` 換成 `grill-me-done`（依來源用對應的
+      改 label 方式；GitHub 記得是先加後移除兩個動作）。
 
 ## 已知限制
 
-- **repo 解析只涵蓋現有慣例**：104corp 任務靠 `104cac-product-registry`
-  的登錄表（以 project key 比對 `jira.project`）；wm4n 個人任務沒有登錄
-  表可查，公司任務查不到對應項目、或一個產品對到多個 repo/平台時也一
-  樣——一律把「哪個 repo」併入 frontier 問人類，這是設計上的正常路徑，
-  不是失敗。
-- **沒有獨立 Jira bot 身份**：各 bot 都用人類/團隊帳號回覆 Jira（Rick/
-  Morty 依 `repo-identity` 切換、Genie 固定用 104cac），判斷「這則留言
-  是不是自己剛貼的」一律靠文字簽名標記，不是帳號身份——`jira-grill-poller`
+- **repo 解析只涵蓋現有慣例（僅 Jira 來源）**：104corp 任務靠
+  `104cac-product-registry` 的登錄表（以 project key 比對 `jira.project`）；
+  wm4n 個人任務沒有登錄表可查，公司任務查不到對應項目、或一個產品對到多個
+  repo/平台時也一樣——一律把「哪個 repo」併入 frontier 問人類，這是設計上的
+  正常路徑，不是失敗。**GitHub 來源完全沒有這個問題**，repo 就在參數裡。
+- **沒有獨立的 bot 身份（兩種來源皆然）**：各 bot 都用人類/團隊帳號回覆
+  （Rick/Morty 依 `repo-identity` 切換、Genie 固定用 104cac），判斷「這則
+  留言是不是自己剛貼的」一律靠文字簽名標記，不是帳號身份——`grill-poller`
   跟這裡的重複觸發防護都是靠這個機制，改了簽名格式兩邊都會失效。
-- **重複觸發防護是機率性的**：`jira-grill-poller` 沒有分散式鎖，理論上
+  GitHub 來源技術上可以改用留言作者的 login 比對（比簽名可靠），**刻意不
+  這樣做**：那會讓兩種來源的判斷邏輯分岔，跨來源一致性的價值大於這點可靠度
+  差異。
+- **重複觸發防護是機率性的**：`grill-poller` 沒有分散式鎖，理論上
   仍存在極窄的競態窗口（poller 判斷完、Discord 訊息送出前，Rick 剛好
   完成上一輪並貼出新留言），但本 skill 步驟 3 的簽名檢查會在絕大多數
   情況下擋下重複處理。
-- **收斂/中止通知不是真正的 Jira @mention**：只是純文字寫 reporter/
+- **收斂/中止通知不是真正的 @mention（僅 Jira 來源）**：只是純文字寫 reporter/
   assignee 的 displayName，不是會觸發 Jira 通知的 `[~accountId]` 語法。
   實務上 Jira 預設會對「有新留言」通知 reporter/assignee/watcher，這則
-  純文字提及只是方便人類在畫面上找到自己，不是通知機制本身。
+  純文字提及只是方便人類在畫面上找到自己，不是通知機制本身。**GitHub 來源
+  不受此限**——`@login` 是真的會發通知的 mention。
 - **中止/收斂路徑沒有回頭鍵，但這是可接受的**：把 label 改回 `grill-me`
-  會被下次 `jira-grill-poller` 的 Query 1 當成全新票重新處理——這是
+  會被下次 `grill-poller` 的 Query 1 當成全新目標重新處理——這是
   設計上允許的行為，不是 bug。
-- **`--comments 50` 是硬上限**：單張票的往返超過 50 則留言會讓最早的
-  歷史看不到；純粹靠 Jira 留言串本身作為真相來源，理論上仍可能因為超過
-  這個上限而遺漏極早期的脈絡，但一輪 grilling 通常遠低於 50 則留言，
-  接受此限制。
+- **`--comments 50` 是硬上限（僅 Jira 來源）**：單張票的往返超過 50 則
+  留言會讓最早的歷史看不到；純粹靠留言串本身作為真相來源，理論上仍可能因為
+  超過這個上限而遺漏極早期的脈絡，但一輪 grilling 通常遠低於 50 則留言，
+  接受此限制。GitHub 來源用 `gh issue view --json comments` 取得全部留言，
+  沒有這個上限。
 - **輪詢頻率、掃描的 project 範圍不是本 skill 能決定**：由
-  `jira-grill-poller` 的 K8s CronJob 設定（`schedule`、
-  `JIRA_GRILL_PROJECTS`）決定，見
-  `deployment-guides/k3s/jira-grill-poller/`。
+  `grill-poller` 的 K8s CronJob 設定（`schedule`、`JIRA_PROJECTS`、
+  `GITHUB_REPOS`）決定，見 `deployment-guides/k3s/grill-poller/`。genie 與
+  rick 各有自己的實例、各自的白名單與 Discord 頻道，互不重疊。
 - **規格類／工程類的分類靠 LLM 語意判斷，沒有精確規則**：跟中止訊號
   判斷一樣，極端措辭可能誤判某個分支的類型，但每輪留言都留下明確紀錄，
   人類事後可查、可用文字要求重新歸類。
 - **規格→工程的階段閘門只擋一次，不會走回頭路**：工程階段才發現的
   規格類新問題直接當一般 frontier 問題問掉，不會強制退回規格階段重新
   走一次全局閘門——這是設計上的正常路徑，不是 bug。
-- **本 skill 由多個 bot 共用（Rick、Genie），一張票理論上可能被兩隻
-  bot 交錯處理**：例如人類手動請 Genie 對一張票跑一輪，之後這張票又被
-  `jira-grill-poller`（預設目標 Rick）偵測到有新回覆而觸發 Rick——兩隻
-  bot 各自依「自己的簽名」判斷要不要處理（見步驟 3），不會重複回答
-  同一輪，但留言串裡會混雜兩種簽名，人類閱讀時需要自己分辨是哪隻 bot
-  回的。
+- **本 skill 由多個 bot 共用（Rick、Genie），同一個目標理論上可能被兩隻
+  bot 交錯處理**：自動觸發這條路已經不會撞到——genie 與 rick 各有自己的
+  `grill-poller` 實例，白名單互不重疊。剩下的可能是**人類手動 @ 另一隻**
+  （例如人類請 Genie 對一張本來歸 rick 的 issue 跑一輪）。兩隻 bot 各自依
+  「自己的簽名」判斷要不要處理（見步驟 3），不會重複回答同一輪，但留言串裡
+  會混雜兩種簽名，人類閱讀時需要自己分辨是哪隻 bot 回的。
