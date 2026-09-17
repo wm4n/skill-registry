@@ -219,8 +219,11 @@ echo "JIRA_BASE_URL: ${JIRA_BASE_URL:+set}"
 
 ```bash
 gh auth status
-gh api "repos/<owner>/<repo>" --jq '.permissions' 2>/dev/null || echo "NO_ACCESS"
+gh api "repos/${REPO}" --jq '.permissions' 2>/dev/null || echo "NO_ACCESS"
 ```
+
+（`$REPO` 的取得方式見下方「GitHub API 慣例」；`gh api` 吃的是 API 路徑，
+跟 `gh issue` 子指令的參數格式不同，這裡可以直接用 `owner/repo`。）
 
 ⚠️ **這是最容易卡住的地方**：能讀 issue ≠ 能留言。若 bot 的 PAT 沒有
 `Issues: Read and write`，前面的分析全部會做完、最後貼留言那一步才失敗，白燒
@@ -269,8 +272,22 @@ fi
 
 ## GitHub API 慣例
 
-一律用 `gh` CLI，不自己拼 REST 呼叫——`gh` 已經處理好認證與分頁。以下用
-`ISSUE_REF` 代表 `owner/repo#N` 這種完整參照，`gh` 各子指令都吃這個形式。
+一律用 `gh` CLI，不自己拼 REST 呼叫——`gh` 已經處理好認證與分頁。
+
+### ⚠️ 先把參數拆開：`gh` 不吃 `owner/repo#N`
+
+`$ARGUMENTS` 給的是 `github-issue wm4n/chainbreak#42`，但 **`gh issue` 各子指令
+只接受 `{<number> | <url>}`**，直接把 `owner/repo#N` 丟進去會得到
+`invalid issue format: "wm4n/chainbreak#42"`。所以每次都先拆成兩個變數，repo
+用 `--repo` 旗標指定：
+
+```bash
+ISSUE_REF="wm4n/chainbreak#42"   # 從 $ARGUMENTS 取得
+REPO="${ISSUE_REF%#*}"           # → wm4n/chainbreak
+NUM="${ISSUE_REF##*#}"           # → 42
+```
+
+下面所有指令都用這組 `$REPO` / `$NUM`。
 
 ### 讀內容與留言
 
@@ -279,14 +296,15 @@ fi
 最容易寫反的地方：
 
 ```bash
-gh issue view "$ISSUE_REF" --json number,title,body,labels,author,assignees,comments
+gh issue view "$NUM" --repo "$REPO" \
+  --json number,title,body,labels,author,assignees,comments
 ```
 
 ### 貼 comment
 
 ```bash
 # COMMENT_BODY 是要貼的完整文字（含結尾簽名，見上方「提問格式與簽名標記」）
-gh issue comment "$ISSUE_REF" --body "$COMMENT_BODY"
+gh issue comment "$NUM" --repo "$REPO" --body "$COMMENT_BODY"
 ```
 
 ### 改 label
@@ -296,8 +314,8 @@ Jira 用單一 PUT 同時 remove + add（原子）；GitHub 沒有等價操作�
 寫則會兩個 label 都沒有、這張 issue 從此沒有任何 poller 撿得到：
 
 ```bash
-gh issue edit "$ISSUE_REF" --add-label grill-me-done
-gh issue edit "$ISSUE_REF" --remove-label grill-me-active
+gh issue edit "$NUM" --repo "$REPO" --add-label grill-me-done
+gh issue edit "$NUM" --repo "$REPO" --remove-label grill-me-active
 ```
 
 ## 流程（來源中立；`$ARGUMENTS` 為 `ticket <TICKET_ID>` 或 `github-issue <owner/repo#N>`）
@@ -308,7 +326,8 @@ gh issue edit "$ISSUE_REF" --remove-label grill-me-active
 1. 確認該來源需要的環境變數／憑證（見「環境變數／憑證（依來源分流）」）。
 2. 取得完整內容（含 labels、全部留言）：
    - **Jira**：`jira-fetch ${TICKET_ID} --comments 50`（留言新到舊排序）
-   - **GitHub**：`gh issue view "$ISSUE_REF" --json …`（留言**舊到新**排序）
+   - **GitHub**：先拆出 `$REPO`/`$NUM`（見「GitHub API 慣例」），
+     `gh issue view "$NUM" --repo "$REPO" --json …`（留言**舊到新**排序）
 3. **重複觸發防護**：看**最新**那一則留言（⚠️ Jira 是陣列第一個、GitHub 是
    最後一個，兩邊相反），若含**自己**（當前執行本 skill 的 bot）的簽名標記
    `— By {自己的名稱} (jira-grill)` → 代表這次觸發是 race 造成的重複觸發
