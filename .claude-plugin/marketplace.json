@@ -36,6 +36,13 @@
       "description": "macOS 磁碟空間分析 skill：唯讀掃描快取、日誌、暫存、垃圾桶、大檔/舊檔、node_modules、各套件管理器快取、Docker、Xcode、iOS 備份、Time Machine 本機快照，產生分類 + 風險徽章 + 可複製清理指令的報告；只掃描不刪除。",
       "version": "1.0.0",
       "strict": true
+    },
+    {
+      "name": "pm-bot-skills",
+      "source": "./plugins/pm-bot-skills",
+      "description": "product manager bot 專用 skill（目前只有 Summer 裝）：依數據規劃需求並開 issue、回答 grill 逼問、backlog 排序與轉單提議、PR 需求驗收、定期進度回報",
+      "version": "1.0.0",
+      "strict": true
     }
   ]
 }

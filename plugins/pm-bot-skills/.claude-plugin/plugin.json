@@ -1,0 +1,11 @@
+{
+  "$schema": "https://claude.ai/schemas/plugin.json",
+  "name": "pm-bot-skills",
+  "version": "1.0.0",
+  "description": "product manager bot 專用 skill（目前只有 Summer 裝）：依數據規劃需求並開 issue、回答 grill 逼問、backlog 排序與轉單提議、PR 需求驗收、定期進度回報",
+  "author": {
+    "name": "William Chao",
+    "email": "wmandev@gmail.com"
+  },
+  "keywords": ["openab", "discord-bot", "product-manager", "backlog", "grill", "acceptance"]
+}
