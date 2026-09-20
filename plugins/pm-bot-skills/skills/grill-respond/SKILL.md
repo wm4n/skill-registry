@@ -2,14 +2,15 @@
 name: grill-respond
 argument-hint: "github-issue <owner/repo#N>"
 description: >-
-  回答 Rick/Morty 用 jira-grill 對 Summer 開的需求 issue 提出的逼問。由獨立
-  部署的 summer-grill-responder（Mac cron，不含 LLM）偵測到 issue 最後一則
-  留言帶 (jira-grill) 簽名時，用專屬 Discord 訊息觸發（不是人類
-  @mention）：讀完整 issue 與留言，逐題回答最新一輪規格類問題，需要人類
-  商業判斷的明說「這題要人類決定」並 @ issue author、不硬掰，貼一則以
-  — By Summer (grill-respond) 結尾的回覆——這串簽名是 grill-poller.sh
-  判斷「該不該換 Rick/Morty 問下一輪」的唯一依據，絕不能用 jira-grill 的
-  (jira-grill) 簽名收尾。不改 label、不開發、不碰程式碼、不開 PR。
+  回答 Rick/Morty 用 jira-grill 對 Summer 開的需求 issue 提出的逼問。由
+  規劃中的 summer-grill-responder（Mac cron，不含 LLM；腳本已寫好，cron
+  尚未掛上，見「已知限制」）偵測到 issue 最後一則留言帶 (jira-grill) 簽名
+  時，用專屬 Discord 訊息觸發（不是人類 @mention）：讀完整 issue 與留言，
+  逐題回答最新一輪規格類問題，需要人類商業判斷的明說「這題要人類決定」
+  並 @ issue author、不硬掰，貼一則以 — By Summer (grill-respond) 結尾的
+  回覆——這串簽名是 grill-poller.sh 判斷「該不該換 Rick/Morty 問下一輪」
+  的唯一依據，絕不能用 jira-grill 的 (jira-grill) 簽名收尾。不改 label、
+  不開發、不碰程式碼、不開 PR。
 ---
 
 # Grill Respond
@@ -96,7 +97,8 @@ NUM="${ISSUE_REF##*#}"           # → 42
 6. **逐題作答**：只回答步驟 5 找到的這一輪問題，逐題對應，不多答、不少
    答。判斷依據是 issue 的標題／描述／驗收條件、留言串裡累積的脈絡，以及
    Summer 對產品與數據的判斷——不需要讀程式碼或 clone repo（Summer 開的
-   單設計上只問規格類問題，見設計文件「Label 狀態機」的決策 #5）。
+   單設計上只問規格類問題，見設計文件「簽名協定 > 怎麼認出這是 Summer
+   開的單」一節引用的決策 #5——決策 #5 本身列在文件開頭的「設計決策」表）。
 
    **答不出來的處理**：凡是需要人類做商業決定的題目（例如砍不砍某個範圍、
    要不要多花預算、上線時間怎麼取捨）——**明說「這題要人類決定」，
@@ -165,5 +167,15 @@ NUM="${ISSUE_REF##*#}"           # → 42
   的責任）。
 - **不開發、不碰程式碼、不開 PR**——這支 skill 只回答問題，不做任何
   工程動作。
-- **不主動起新的問題或幫忙補問題**——只回答步驟 4 找到的那一輪，其餘一律
+- **不主動起新的問題或幫忙補問題**——只回答步驟 5 找到的那一輪，其餘一律
   留給 `jira-grill` 下一輪自己決定要不要問。
+
+## 已知限制
+
+- **`summer-grill-responder.sh` 的 cron 尚未掛上**：腳本已寫好並有測試
+  （`deployment-guides/mac/rick-morty-poller/summer-grill-responder.sh`
+  與 `tests/test_summer_responder.sh`），但 Mac 上的 `crontab` 還沒實際
+  排這支腳本的每 10 分鐘輪詢（見 `deployment-guides/mac/README.md`
+  「`summer-grill-responder.sh` 的 cron 掛法」一節）；掛上之前，這支
+  skill 只能靠人類手動貼出「執行 grill-respond skill，參數：
+  github-issue <owner/repo>#<number>」這則固定措辭觸發。

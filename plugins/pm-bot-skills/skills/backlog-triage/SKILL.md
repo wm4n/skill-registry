@@ -3,12 +3,13 @@ name: backlog-triage
 argument-hint: "[<owner/repo>#<N>]"
 description: >-
   排序 grill-me-done 待辦、修復 agent-failed 規格、警示逾時卡單的 backlog
-  巡查。由 usercron 平日 10:00 觸發（訊息「執行 backlog-triage skill」），
-  或人類在 Discord 提出同類請求（如「排一下優先序」「看看卡住的單」「這張
-  能改回去了嗎」）時觸發：三段各自獨立掃描 grill-me-done／agent-failed／
-  agent-active 三個 label，在 Discord 提議排序、提議改回 ready-for-agent、
-  或告警卡單，只提議、絕不自行貼 ready-for-agent——人類點頭後才在後續 turn
-  貼上（先加 ready-for-agent 再移除 grill-me-done）。
+  巡查。由規劃中的 usercron 平日 10:00 觸發（訊息「執行 backlog-triage
+  skill」，sender_name＝SummerTriage；cronjob.toml 尚未寫入，見「已知
+  限制」），或人類在 Discord 提出同類請求（如「排一下優先序」「看看卡住的
+  單」「這張能改回去了嗎」）時觸發：三段各自獨立掃描 grill-me-done／
+  agent-failed／agent-active 三個 label，在 Discord 提議排序、提議改回
+  ready-for-agent、或告警卡單，只提議、絕不自行貼 ready-for-agent——人類
+  點頭後才在後續 turn 貼上（先加 ready-for-agent 再移除 grill-me-done）。
 ---
 
 # Backlog Triage
@@ -113,8 +114,14 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
 
 對每一張：
 
-1. 讀 Rick/Morty 的 `auto-dev-pipeline` 留下的規格問題說明 comment，找出
-   具體缺口在哪（漏了驗收條件、範圍描述不清、跟現有功能衝突……）。
+1. 讀 Rick/Morty 留下的規格問題說明 comment，找出具體缺口在哪（漏了
+   驗收條件、範圍描述不清、跟現有功能衝突……）。**這則留言來自 persona
+   `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b**（`solo-feature-pipeline`
+   判定為規格問題時，因為發起方不是活人、走不了「回頭問人類」那條路，
+   改成留言＋改 label＋停手，見 §4b）——**不是** Genie 的
+   `auto-dev-pipeline`：Rick/Morty 沒有那個 skill，兩邊是不同的
+   pipeline，也是不同的 label 命名空間（`agent-failed`／`agent-active`
+   對照 Genie 的 `agent-dev-failed`／`agent-dev-active`）。
 2. 針對那個缺口修 issue 描述：
 
    ```bash
@@ -163,15 +170,22 @@ gh issue list --repo wm4n/hangman    --label agent-active --state open \
 
 **是「疑似」，不是已核實的事實**：Summer 看不到 Mac mini／k3s 上實際的
 pod 狀態，`updatedAt` 逾時只是一個訊號——多數情況下確實代表卡住，但也可能
-是 Rick/Morty 正常開發中、剛好這一輪沒有留言（`auto-dev-pipeline` 全程只在
-開頭與結尾留言，正常一輪遠短於 24 小時，機率低但不是零）。告警文字要用
-「疑似卡單，建議核實 pod 狀態」這種留有查證空間的措辭，不要寫成「已確認
-卡住」。
+是 Rick/Morty 正常開發中、剛好這一輪還沒有任何留言。Rick/Morty 走的
+`solo-feature-pipeline`（經 persona §4b 跳過確認閘門）不像 Genie 的
+`auto-dev-pipeline` 那樣一開始會貼「🧞 開始處理」留言可以對照——除非中途
+踩到規格問題，否則直到開完 PR 收尾前都可能完全沒有任何留言，正常一輪遠
+短於 24 小時，機率低但不是零。告警文字要用「疑似卡單，建議核實 pod
+狀態」這種留有查證空間的措辭，不要寫成「已確認卡住」。
 
-**這段只告警，不嘗試恢復**：`auto-dev-pipeline` 自己列出的已知限制是
-`agent-active` 沒有逾時自動復原，pod 中途被殺會永久卡住——本 skill 的職責
-到「讓人類知道有這張疑似卡住了」為止，實際去 Mac mini／k3s 查 pod 狀態是
-人類或另一個 runbook 的事，不在這裡處理。
+**這段只告警，不嘗試恢復**：查過 `agent-dev-poller.sh`（Mac 版）與
+Rick/Morty persona §4b，兩邊都沒有寫任何 `agent-active` 逾時自動復原的
+機制——這是 Rick/Morty 這條 pipeline 自己查證過的限制，**不是**從 Genie
+的 `auto-dev-pipeline` 借來的：那支 skill 已知限制講的是它自己的
+`agent-dev-active`（名字很像，但跟 Rick/Morty 的 `agent-active` 是不同
+的 label，屬於不同的 skill）。pod 中途被殺會讓這張 issue 永久卡在
+`agent-active`，本 skill 的職責到「讓人類知道有這張疑似卡住了」為止，
+實際去 Mac mini／k3s 查 pod 狀態是人類或另一個 runbook 的事，不在這裡
+處理。
 
 ## 鐵則
 
@@ -214,3 +228,13 @@ pod 狀態，`updatedAt` 逾時只是一個訊號——多數情況下確實代�
   issue 描述文字、貼 Discord 訊息，以及人類點頭後的 label 操作。
 - Discord 訊息維持精簡（2000 字上限），多張卡單或多個提議合併成一則摘要，
   不要逐張各發一則。
+
+## 已知限制
+
+- **usercron 排程尚未部署**：目前只有規劃值（平日 10:00，
+  `sender_name`＝`SummerTriage`），實際要寫進 Summer 容器內的
+  `/home/node/.openab/cronjob.toml` 才會生效（見
+  `docs/superpowers/specs/2026-09-20-summer-pm-pipeline-design.md`
+  的觸發機制總表；`openab-ops` 的 `CRONJOB.md` 也註明這四個 job
+  尚未寫入 cronjob.toml、未部署）；部署前，這支 skill 只能靠人類在
+  Discord 主動要求觸發。

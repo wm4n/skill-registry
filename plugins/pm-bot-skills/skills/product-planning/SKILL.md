@@ -2,13 +2,14 @@
 name: product-planning
 argument-hint: "[--property chainbreak|hangman]"
 description: >-
-  依 GA4 數據與現有 backlog 規劃下一步該做什麼、開需求 issue。由 usercron
-  每週一 09:00 觸發（訊息「執行 product-planning skill」），或人類在 Discord
-  提出同類請求（如「規劃一下需求」「看數據開單」「這週該做什麼」）時觸發：
-  chainbreak 與 hangman 兩個 GA4 property 各自分析、不平均，比對兩個 repo
-  現有 issue 避免重複開單，找出 1–3 個寫得出驗收條件的需求開 issue，body
-  結尾簽名 — By Summer、貼 grill-me label，Discord 貼精簡摘要與連結。數據
-  拿不到就明說，不推測冒充依據。
+  依 GA4 數據與現有 backlog 規劃下一步該做什麼、開需求 issue。由規劃中的
+  usercron 每週一 09:00 觸發（訊息「執行 product-planning skill」，
+  sender_name＝SummerPlanning；cronjob.toml 尚未寫入，見「已知限制」），
+  或人類在 Discord 提出同類請求（如「規劃一下需求」「看數據開單」「這週該
+  做什麼」）時觸發：chainbreak 與 hangman 兩個 GA4 property 各自分析、不
+  平均，比對兩個 repo 現有 issue 避免重複開單，找出 1–3 個寫得出驗收條件
+  的需求開 issue，body 結尾簽名 — By Summer、貼 grill-me label，Discord
+  貼精簡摘要與連結。數據拿不到就明說，不推測冒充依據。
 ---
 
 # Product Planning
@@ -138,3 +139,13 @@ poller 誤判成新事件、重複觸發。
   之後規格共識、排優先序、貼 `ready-for-agent` 是 `backlog-triage` 的職責。
 - **不自己回答 grill 提問**——那是 `grill-respond` 的職責，由
   `summer-grill-responder` 偵測到問題後另外觸發。
+
+## 已知限制
+
+- **usercron 排程尚未部署**：目前只有規劃值（每週一 09:00，
+  `sender_name`＝`SummerPlanning`），實際要寫進 Summer 容器內的
+  `/home/node/.openab/cronjob.toml` 才會生效（見
+  `docs/superpowers/specs/2026-09-20-summer-pm-pipeline-design.md`
+  的觸發機制總表；`openab-ops` 的 `CRONJOB.md` 也註明這四個 job
+  尚未寫入 cronjob.toml、未部署）；部署前，這支 skill 只能靠人類在
+  Discord 主動要求觸發。
