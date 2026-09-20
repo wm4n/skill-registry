@@ -8,19 +8,23 @@ description: >-
   或人類在 Discord 提出同類請求（如「規劃一下需求」「看數據開單」「這週該
   做什麼」）時觸發：chainbreak 與 hangman 兩個 GA4 property 各自分析、不
   平均，比對兩個 repo 現有 issue 避免重複開單，找出 1–3 個寫得出驗收條件
-  的需求開 issue，body 結尾簽名 — By Summer、貼 grill-me label，Discord
-  貼精簡摘要與連結。數據拿不到就明說，不推測冒充依據。
+  的需求開 issue，body 結尾簽名 — By Summer、貼 grill-me 與 spec-only
+  兩個 label，Discord 貼精簡摘要與連結。數據拿不到就明說，不推測冒充依據。
 ---
 
 # Product Planning
 
 > **本 skill 是責任鏈的起點，`backlog-triage` 接手後段**：這裡開的每張
-> issue，body 結尾都要有 `— By Summer` 簽名——這不是署名，是
-> `summer-grill-responder`／`jira-grill` 用來辨識「這是 PM 開的單」的唯一
-> 依據（共用同一個 wm4n GitHub 帳號，author 分不出來）。漏寫的後果不是報錯，
-> 是這張單被當成人類開的單處理：`summer-grill-responder` 不會觸發 Summer
-> 回答、grill 會走完整兩階段（規格＋工程）而不是 PM 單該有的規格階段就收斂。
-> 沒有任何錯誤訊息會提醒你漏寫了。
+> issue 要帶兩個標記，各自餵給不同的下游消費者，缺一不可：
+> - **body 結尾 `— By Summer` 簽名**——`summer-grill-responder` 用來辨識
+>   「這張單是不是 PM 開的，該不該讓 Summer 搶答」（共用同一個 wm4n
+>   GitHub 帳號，author 分不出來，只能靠簽名）。漏寫的後果不是報錯，是
+>   `summer-grill-responder` 不會觸發 Summer 回答，沒有任何錯誤訊息。
+> - **`spec-only` label**——`jira-grill` 用來判斷「規格共識後要不要跳過
+>   工程階段」，是明確意圖標記，不依賴身份判斷。漏貼的後果同樣不是報錯，
+>   是 grill 會多走一輪完整的工程階段提問——不會卡住或誤觸發，只是比
+>   PM 單該有的流程多問一輪，交給 Rick/Morty 依 `jira-grill` 的分流各自
+>   判斷怎麼答。
 
 ## 觸發與參數
 
@@ -83,6 +87,7 @@ gh pr list --repo wm4n/hangman    --state merged --limit 20 --json number,title,
 gh issue create --repo wm4n/chainbreak \
   --title "<標題>" \
   --label grill-me \
+  --label spec-only \
   --body "$(cat <<'EOF'
 ## 背景
 
@@ -108,8 +113,8 @@ EOF
 ```
 
 body 五個段落缺一不可：標題另外用 `--title`，背景、需求描述、驗收條件、
-數據依據都要有內容。**結尾一定是 `— By Summer`**，`--label grill-me` 跟
-建 issue 同一步做完，這步不用等人類點頭。
+數據依據都要有內容。**結尾一定是 `— By Summer`**，`--label grill-me` 與
+`--label spec-only` 跟建 issue 同一步做完，這步不用等人類點頭。
 
 ⚠️ **簽名開頭的是 em dash（U+2014）「—」，不是連字號「-」**。兩者肉眼幾乎
 分不出來，但下游用字串比對、打錯一個字元就完全比對不上。直接複製本文件
@@ -128,8 +133,10 @@ poller 誤判成新事件、重複觸發。
   掰一個聽起來合理但沒有查證的數字，比誠實說「不知道」更糟，會讓後面排
   優先序的人依據假數據做判斷。
 - 兩個 property **永遠分開報告**，不平均、不加總。
-- issue body 結尾**逐字** `— By Summer`（em dash 開頭），這是整條鏈唯一
-  能辨識「PM 開的單」的依據。
+- issue body 結尾**逐字** `— By Summer`（em dash 開頭），這是
+  `summer-grill-responder` 判斷該不該搶答的依據。
+- **貼齊 `grill-me` 與 `spec-only` 兩個 label**——後者是 `jira-grill`
+  判斷要不要跳過工程階段的依據，兩者用途不同，不能只貼一個。
 
 ## 不做什麼
 
