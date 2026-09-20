@@ -7,8 +7,10 @@ description: >-
   jira-grill-trigger bot @mention 觸發（不是人類 @mention、不在一般 Discord
   對話）：先解析並準備好對應的 GitHub repo，再在該票證的留言串上用 grilling
   式連續追問（design tree/frontier，見 mattpocock-skills:grilling）——先問完
-  規格類問題、達成規格共識後才問工程類問題，避免同一輪同時驚動 PM 與工程師，
-  收斂或人類喊停後只貼結論通知人類，不自動開發、不交棒。
+  規格類問題、達成規格共識後才問工程類問題，避免同一輪同時驚動 PM 與工程師
+  （PM 開的單——issue body 含 `— By Summer`，僅 GitHub 來源——規格共識後
+  直接收斂，跳過工程階段），收斂或人類喊停後只貼結論通知人類，不自動開發、
+  不交棒。
 ---
 
 # Jira Grill
@@ -392,7 +394,8 @@ gh issue edit "$NUM" --repo "$REPO" --remove-label grill-me-active
           - 工程類分支也全部清空（雙方對需求達成完整共識）→ 跳到步驟
             6a。
 6. **收斂／中止收尾**（6a 自然收斂／6b 人類中止，兩者都要做完下面全部）：
-   a. 自然收斂（規格與工程兩階段的 frontier 都清空）：貼一則「✅ 需求
+   a. 自然收斂（規格與工程兩階段的 frontier 都清空，或 PM 單在規格共識
+      後直接跳過工程階段）：貼一則「✅ 需求
       共識」comment，把整輪問答蒸餾成結構化的最終需求描述（背景、確認
       的需求範圍、驗收條件、目標 repo），附簽名。
       人類中止：貼一則「🛑 已中止 grill-me（人類要求停止）」comment，
