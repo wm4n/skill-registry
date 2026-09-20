@@ -97,21 +97,54 @@ NUM="${ISSUE_REF##*#}"           # → 42
      缺口還沒補齊的現階段，「異常」的張數本身就是判斷缺口有沒有修好
      的觀察指標。
 
-### 1. 找出對應 PR
+### 1. 找出對應 PR——優先用 GraphQL 原生關聯，留言比對是 fallback
 
-`gh issue view` 沒有可靠的「這張 issue 對應哪個 PR」欄位，改成在
-`comments`（`gh` 慣例是舊到新排序，最新一則是陣列最後一個）裡找
-Rick/Morty 完成開發時貼的收尾留言（`solo-feature-pipeline` 步驟 6
-「建 PR + 通知」——見文首已知缺口，這一步的留言格式屬於待補齊的部分，
-一旦補齊預期會包含 PR 連結）——它會包含一個
-`https://github.com/<owner>/<repo>/pull/<N>` 形式的連結。取**最新**一則
-含這種連結的留言。
+Rick/Morty 開 PR 時，persona `Rick-CLAUDE_v2.md` §4b（2026-09-20 才
+補上，**尚未實機驗證**）要求 PR 描述要寫 `Closes #<issue 編號>`，
+GitHub 會據此建立 issue↔PR 的原生關聯，直接查詢就好，不必先靠比對
+留言文字：
 
-**找不到歸類為「異常」，不是「跳過」**（見步驟 0 的分類）：`agent-done`
-已經貼上卻找不到對應 PR 連結，代表留言格式跟預期不符、流程中斷，或者
-這張根本不是走正常路徑貼上這個 label 的。記錄下來，繼續處理範圍內
-其餘 issue，但在 Discord 摘要裡要單獨列出，不要跟「已驗收過」的正常
-跳過混在一起——不要憑 issue 標題或猜測去湊一個 PR 編號。
+```bash
+OWNER="${REPO%%/*}"
+REPO_NAME="${REPO#*/}"
+gh api graphql -f query='
+query($owner:String!, $repo:String!, $issue:Int!) {
+  repository(owner:$owner, name:$repo) {
+    issue(number:$issue) {
+      closingPullRequests(first:5) { nodes { number url title state } }
+    }
+  }
+}' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM"
+```
+
+⚠️ **`issue` 一定要用 `-F`，不能用 `-f`**：`-f` 一律把值當字串傳，這裡
+GraphQL 宣告的是 `Int!`，用 `-f` 會型別錯誤。
+
+依回傳的 `nodes` 判斷：
+
+- 剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR，取它的 `number`，
+  跳過下面的 fallback，直接進步驟 2。
+- 沒有任何 node，或所有 node 都不是 `OPEN`（`Closes #N` 沒寫，或寫的
+  格式 GitHub 辨識不出來）→ 改用下方「Fallback：留言文字比對」。
+- 超過一個 `OPEN` 的 node（理論上不該發生，`closingPullRequests` 對應
+  的應該是唯一一張正在等 merge 的 PR）→ 無法判斷哪一個才是這輪要驗收
+  的目標，**歸類為「異常」**（見步驟 0），記錄下所有候選 PR 編號讓
+  人類自己判斷，不要自己猜一個當成正確答案。
+
+#### Fallback：留言文字比對
+
+只有在 GraphQL 找不到唯一的 `OPEN` PR 時才用這條路。改成在 `comments`
+（`gh` 慣例是舊到新排序，最新一則是陣列最後一個）裡找 Rick/Morty 完成
+開發時貼的收尾留言（`solo-feature-pipeline` 步驟 6「建 PR + 通知」），
+它預期包含一個 `https://github.com/<owner>/<repo>/pull/<N>` 形式的
+連結。取**最新**一則含這種連結的留言。
+
+**兩條路都落空才歸類為「異常」，不是「跳過」**（見步驟 0 的分類）：
+`agent-done` 已經貼上卻兩種方式都定位不到對應 PR，代表 `Closes #N`
+沒寫、留言格式也跟預期不符，或流程中斷，或這張根本不是走正常路徑貼上
+這個 label 的。記錄下來，繼續處理範圍內其餘 issue，但在 Discord 摘要
+裡要單獨列出，不要跟「已驗收過」的正常跳過混在一起——不要憑 issue
+標題或猜測去湊一個 PR 編號。
 
 ### 2. 冪等檢查
 
@@ -317,10 +350,16 @@ repo，不需要完整 URL 也能定位），完整的逐條依據留在 PR 留�
   想要求重新驗收，目前只能由人類指名單張參數
   `<owner/repo>#<N>` 觸發，並在 PR 上額外說明要重新驗收——這裡沒有
   「先刪舊留言再重跑」的自動機制，是刻意接受的限制。
-- **PR 連結靠留言文字比對，不是 GitHub 原生的關聯欄位**：若
-  `solo-feature-pipeline` 步驟 6 收尾留言的措辭改了、不再包含可辨識的
-  PR 連結，步驟 1 的比對邏輯要跟著更新——這一點在標籤鏈缺口補齊、
-  真正開始有留言可讀之後才有機會被驗證到。
+- **找 PR 現在主要依賴 persona §4b 新補上的 `Closes #N` 慣例，尚未
+  實機驗證**：GraphQL 查詢（步驟 1）能不能找到 PR，取決於 Rick/Morty
+  開 PR 時是否真的照 §4b（2026-09-20 才補上）在描述裡寫
+  `Closes #<issue 編號>`——這條要求本身還沒有實機跑過驗證。若沒有被
+  確實遵守，GraphQL 會查不到，退到 fallback 的留言比對；兩者都落空
+  才是真正的「異常」，這一點的容錯已經在步驟 1 設計進去了。
+- **Fallback 的留言比對仍是文字比對，不是原生關聯**：只在 GraphQL
+  找不到唯一的 `OPEN` PR 時才會用到，若 `solo-feature-pipeline` 步驟 6
+  收尾留言的措辭改了、不再包含可辨識的 PR 連結，這條路徑要跟著更新
+  ——這一點在標籤鏈缺口補齊、真正開始有留言可讀之後才有機會被驗證到。
 - **驗收發現不滿足、人類點頭送回開發後，舊 PR 不會自動關閉**，處理方式
   留給人類決定。
 - **與 GitHub 帳號共用問題同源於
