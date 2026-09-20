@@ -8,9 +8,9 @@ description: >-
   對話）：先解析並準備好對應的 GitHub repo，再在該票證的留言串上用 grilling
   式連續追問（design tree/frontier，見 mattpocock-skills:grilling）——先問完
   規格類問題、達成規格共識後才問工程類問題，避免同一輪同時驚動 PM 與工程師
-  （PM 開的單——issue body 含 `— By Summer`，僅 GitHub 來源——規格共識後
-  直接收斂，跳過工程階段），收斂或人類喊停後只貼結論通知人類，不自動開發、
-  不交棒。
+  （issue 帶 `spec-only` label 時——僅 GitHub 來源——規格共識後直接收斂，
+  跳過工程階段、交由後續開發者自行判斷技術做法），收斂或人類喊停後只貼
+  結論通知人類，不自動開發、不交棒。
 ---
 
 # Jira Grill
@@ -120,16 +120,21 @@ frontier 也一樣扣住不問——這是**全局閘門**，不是逐條依賴�
 技術、架構怎麼改」（工程類）。不設固定關鍵字規則，跟下方「中止訊號 2」
 的語意判斷方式一致。
 
-**PM 開的單跳過工程階段（僅 GitHub 來源）**：規格類分支全部清空時，先看
-issue body 有沒有 `— By Summer`（開頭是 em dash）：
-- 有 → 這是 PM bot（Summer）開的單。工程決策屬於實際執行開發的 bot
-  （Rick/Morty 在 `solo-feature-pipeline` 裡自己判斷），grill 階段先問
-  等於把決策從執行者手上拿走，還多燒一半的 LLM 輪次。直接跳到流程步驟
-  6a 收斂，**不貼**下方的階段轉換里程碑 comment，**不進**工程階段。
+**`spec-only` label 跳過工程階段（僅 GitHub 來源）**：規格類分支全部清空
+時，先看 issue 有沒有 `spec-only` label：
+- 有 → 開單者已經判斷這張單的工程決策要留給實際執行開發的人／bot 自行
+  判斷（例如 Rick/Morty 在 `solo-feature-pipeline` 裡自己判斷），grill
+  階段先問等於把決策從執行者手上拿走，還多燒一半的 LLM 輪次。直接跳到
+  流程步驟 6a 收斂，**不貼**下方的階段轉換里程碑 comment，**不進**工程
+  階段。
 - 沒有 → 維持現行行為：貼階段轉換里程碑、進入工程階段。
 
-Jira 來源沒有這個分流——PM bot 目前只開 GitHub issue，Jira 票一律走
-現行的兩階段流程。
+`spec-only` 是明確的意圖標記，不是身份判斷——不需要知道是誰貼的、也不
+需要靠簽名或帳號推論。目前只有 `pm-bot-skills:product-planning` 會自動
+貼，但任何人／bot 都能貼這個 label 表達同樣的意圖。
+
+Jira 來源沒有這個分流——這個 label 目前只用在 GitHub issue，Jira 票一律
+走現行的兩階段流程。
 
 **階段轉換里程碑**：規格類分支**全部**清空的那一輪，貼一則里程碑
 comment（格式見下方「提問格式與簽名標記」），**同一則 comment 緊接著
@@ -382,10 +387,10 @@ gh issue edit "$NUM" --repo "$REPO" --remove-label grill-me-active
           - 規格類還有未決分支（可能包含還沒回答的「哪個 repo」）→
             產出下一輪規格類 frontier 問題，貼成新 comment（格式見
             上文），結尾附「目前還有 N 個規格分支未決」→ 結束。
-          - 規格類分支全部清空 → 先看 issue body 有沒有 `— By Summer`
+          - 規格類分支全部清空 → 先看 issue 有沒有 `spec-only` label
             （僅 GitHub 來源；Jira 沒有這個分流，一律視為沒有）：
-            - 有 → PM 開的單，工程決策留給執行開發的 bot，跳到步驟 6a
-              收斂，不貼階段轉換里程碑 comment、不進工程階段。
+            - 有 → 工程決策留給後續處理者，跳到步驟 6a 收斂，不貼階段
+              轉換里程碑 comment、不進工程階段。
             - 沒有 → 貼階段轉換里程碑 comment，緊接著列出第一輪工程類
               frontier 問題（格式見上文）→ 結束。
         - **工程階段**：
@@ -394,8 +399,8 @@ gh issue edit "$NUM" --repo "$REPO" --remove-label grill-me-active
           - 工程類分支也全部清空（雙方對需求達成完整共識）→ 跳到步驟
             6a。
 6. **收斂／中止收尾**（6a 自然收斂／6b 人類中止，兩者都要做完下面全部）：
-   a. 自然收斂（規格與工程兩階段的 frontier 都清空，或 PM 單在規格共識
-      後直接跳過工程階段）：貼一則「✅ 需求
+   a. 自然收斂（規格與工程兩階段的 frontier 都清空，或帶 `spec-only`
+      label 的單在規格共識後直接跳過工程階段）：貼一則「✅ 需求
       共識」comment，把整輪問答蒸餾成結構化的最終需求描述（背景、確認
       的需求範圍、驗收條件、目標 repo），附簽名。
       人類中止：貼一則「🛑 已中止 grill-me（人類要求停止）」comment，
@@ -424,11 +429,6 @@ gh issue edit "$NUM" --repo "$REPO" --remove-label grill-me-active
   GitHub 來源技術上可以改用留言作者的 login 比對（比簽名可靠），**刻意不
   這樣做**：那會讓兩種來源的判斷邏輯分岔，跨來源一致性的價值大於這點可靠度
   差異。
-- **PM 開的單靠 issue body 的 `— By Summer` 辨識，不是 author（僅
-  GitHub 來源）**：Summer 與人類在 `wm4n/*` 共用同一個 GitHub 帳號，
-  author 無法區分，只能靠 issue body 結尾的簽名判斷（見「分階段
-  提問」）。人類若手動在 body 寫了這串字會被誤判成 PM 開的單。帳號分離後
-  改用 author（wm4n/openab-ops#3）。
 - **重複觸發防護是機率性的**：`grill-poller` 沒有分散式鎖，理論上
   仍存在極窄的競態窗口（poller 判斷完、Discord 訊息送出前，Rick 剛好
   完成上一輪並貼出新留言），但本 skill 步驟 3 的簽名檢查會在絕大多數
