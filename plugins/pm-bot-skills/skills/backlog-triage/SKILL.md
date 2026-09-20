@@ -140,7 +140,8 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
    變更摘要要點名**改了哪個段落、新增或刪除了什麼內容**，不能只寫
    「已更新」——這則 comment 是 persona「資訊同步」鐵則要求的完整紀錄，
    不是可有可無的附註。
-4. Discord 提議「issue 描述已更新（詳見 issue 留言），建議改回
+4. Discord 提議，例如「issue 描述已更新——在『驗收條件』段補上 Rick 指出
+   缺漏的『連線中斷重試』情境、移除跟現有結算流程衝突的第 2 點；建議改回
    `ready-for-agent`」。body 修改本身不受閘門保護（閘門只擋 label），這則
    Discord 摘要是人類核可前的第二道防線，一樣要點名改了哪個段落、新增或
    刪除了什麼，不能只寫「已更新」帶過。
