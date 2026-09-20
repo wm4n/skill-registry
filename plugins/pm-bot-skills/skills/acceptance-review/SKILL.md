@@ -8,10 +8,11 @@ description: >-
   cronjob.toml 尚未寫入，見「已知限制」），或人類在 Discord 提出同類請求
   （如「驗收一下」「這張 PR 符合需求嗎」「看看 agent-done 的單」）時觸發：
   agent-done 代表 Rick/Morty 走完 solo-feature-pipeline（經 persona §4b
-  自動觸發、跳過確認閘門）開完 PR、自我審查通過的狀態——這條標籤鏈目前
-  有已知缺口（成功路徑還沒有貼這個 label 的步驟，見「已知限制」），本
-  skill 因此把「掃到 0 張」與「找不到對應 PR」都設計成看得見、不跟正常
-  的冪等跳過混在一起。先查 PR 上有沒有已帶
+  自動觸發、跳過確認閘門）開完 PR、自我審查通過的狀態——這條標籤鏈已由
+  persona §4b（2026-09-20 補上，尚未實機驗證）補齊，本 skill 仍把「掃到
+  0 張」與「找不到對應 PR」都設計成看得見、不跟正常的冪等跳過混在一起
+  （見「已知限制」），因為鏈補上之後有沒有被確實遵守，還沒有實機資料
+  可以確認。先查 PR 上有沒有已帶
   — By Summer (acceptance-review) 簽名的留言，有就跳過（冪等，不新增
   label）；沒有才以留言串裡「✅ 需求共識」comment 為基準取得驗收條件，
   讀 PR 的 diff、描述逐條標示滿足／不滿足／無法判斷，貼在 PR 上並附
@@ -35,13 +36,20 @@ description: >-
 > 就不允許帳號 approve 自己開的 PR（見
 > [wm4n/openab-ops#3](https://github.com/wm4n/openab-ops/issues/3)）。
 >
-> ⚠️ **`agent-done` 目前可能完全不會被貼上**：`solo-feature-pipeline`
-> 步驟 6「建 PR + 通知」與 persona `Rick-CLAUDE_v2.md` §4b 的成功路徑，
-> 目前都沒有寫「開完 PR 後貼 agent-done」這一步——§4b 只在**失敗**路徑
-> 提到 label（改成 `agent-failed`），成功路徑完全沒提。補齊這段是另一個
-> 任務的責任，不是本 skill 要修的範圍；但下方每一步刻意把「掃不到東西」
-> 設計成看得見、不會安靜空轉（見「流程」步驟 0 與「已知限制」），這樣
-> 缺口還沒補齊、或補齊後又鬆脫，都不會被忽略。
+> ⚠️ **`agent-done` 這條標籤鏈已經補上，但尚未實機驗證**：persona
+> `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b（2026-09-20 新增）現在
+> 明確要求成功路徑收尾三件事——PR 描述寫 `Closes #<issue 編號>`、在
+> issue 貼含 PR 連結的收尾留言、先加 `agent-done` 再移除
+> `agent-active`；舊版本只在**失敗**路徑提到 label（改成
+> `agent-failed`），成功路徑那時完全沒有對應步驟，這次補的就是那個
+> 缺口。但這段要求本身還沒有實機跑過（Rick/Morty 真的照做了嗎、label
+> 順序有沒有貼對），下方每一步仍刻意把「掃不到東西」設計成看得見、不
+> 會安靜空轉
+> （見「流程」步驟 0 與「已知限制」）——**掃到 0 張不再預設是正常
+> 狀態**：這段期間沒有 PR 走完是一種解釋，但補齊後的鏈沒有被確實
+> 遵守（例如漏貼 `agent-done`）也會長成一模一樣的「0 張」，連續多輪
+> 是 0 而 backlog 明顯有在動，就是該懷疑鏈又斷掉的訊號，不能再當成
+> 已知的正常狀態略過。
 
 ## 觸發與參數
 
@@ -81,21 +89,23 @@ NUM="${ISSUE_REF##*#}"           # → 42
 
 - **掃全部時 `$TOTAL` = 0**（兩個白名單 repo 都沒有任何 `agent-done`
   issue）→ **不要就這樣結束**。這代表兩種可能：(a) 這段期間真的沒有
-  PR 完成到可以驗收的狀態，是正常的；(b) `agent-done` 這條標籤鏈斷了
-  （見文首 ⚠️ 已知缺口），Rick/Morty 完成的 PR 根本沒被貼上這個
-  label，本 skill 永遠看不到。這兩種情況在 Discord 上看起來會一模
-  一樣（都是「沒有要驗收的」），所以**每次掃全部都要明確發一則
-  Discord 訊息**講出「本輪掃描 agent-done：0 張」，不要默默什麼都不
-  做——連續多輪都是 0 張，就是提醒人類去確認標籤鏈是否正常運作的訊號。
+  PR 完成到可以驗收的狀態，是正常的；(b) `agent-done` 這條標籤鏈雖然
+  已經由 persona §4b 補上（見文首 ⚠️ 說明），但沒有被確實遵守或又
+  鬆脫了，Rick/Morty 完成的 PR 根本沒被貼上這個 label，本 skill 永遠
+  看不到。這兩種情況在 Discord 上看起來會一模一樣（都是「沒有要驗收
+  的」），所以**每次掃全部都要明確發一則 Discord 訊息**講出「本輪
+  掃描 agent-done：0 張」，不要默默什麼都不做——連續多輪都是 0 張、
+  而 backlog（`grill-me-done`／`ready-for-agent`／`agent-active`）
+  明顯有在動，就是提醒人類去確認標籤鏈是否正常運作的訊號。
 - `$TOTAL` > 0 → 對每一張依序做完下面步驟 1–5。每一張的結果最終只
   會落在三類之一，這三類在 Discord 摘要裡**分開列，不合併成一句籠統
   的「跳過 N 張」**（模板見「Discord 摘要模板」）：
   1. **本輪驗收完成**：走完步驟 1–5，貼出逐條對照表。
   2. **跳過（正常冪等）**：步驟 2 判定已經驗收過。
-  3. **異常（需要人類關注）**：步驟 1 找不到對應 PR，或步驟 3 找不到
-     驗收條件來源。這不是正常跳過，是需要人看見的訊號，尤其在標籤鏈
-     缺口還沒補齊的現階段，「異常」的張數本身就是判斷缺口有沒有修好
-     的觀察指標。
+  3. **異常（需要人類關注）**：步驟 1 的 GraphQL 查詢本身報錯、步驟 1
+     找不到對應 PR，或步驟 3 找不到驗收條件來源。這不是正常跳過，是
+     需要人看見的訊號，尤其在標籤鏈補齊後尚未實機驗證的現階段，
+     「異常」的張數本身就是判斷鏈有沒有正常運作的觀察指標。
 
 ### 1. 找出對應 PR——優先用 GraphQL 原生關聯，留言比對是 fallback
 
@@ -107,29 +117,52 @@ GitHub 會據此建立 issue↔PR 的原生關聯，直接查詢就好，不必�
 ```bash
 OWNER="${REPO%%/*}"
 REPO_NAME="${REPO#*/}"
-gh api graphql -f query='
+if ! GRAPHQL_OUTPUT=$(gh api graphql -f query='
 query($owner:String!, $repo:String!, $issue:Int!) {
   repository(owner:$owner, name:$repo) {
     issue(number:$issue) {
-      closingPullRequests(first:5) { nodes { number url title state } }
+      closedByPullRequestsReferences(first:5, includeClosedPrs:true) {
+        nodes { number url title state }
+      }
     }
   }
-}' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM"
+}' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM" 2>&1); then
+  echo "ERROR: GraphQL 查詢失敗 issue=${REPO}#${NUM}"
+  echo "$GRAPHQL_OUTPUT"
+fi
 ```
 
 ⚠️ **`issue` 一定要用 `-F`，不能用 `-f`**：`-f` 一律把值當字串傳，這裡
 GraphQL 宣告的是 `Int!`，用 `-f` 會型別錯誤。
 
-依回傳的 `nodes` 判斷：
+⚠️ **正確欄位名是 `closedByPullRequestsReferences`**——先前版本用過
+一個 `Issue` 型別上根本不存在的欄位名，查了會直接報
+`Field '<欄位名>' doesn't exist on type 'Issue'` 這類錯誤。已用
+introspection 實查過（`gh api graphql -f query='{ __type(name: "Issue")
+{ fields { name } } }'`，唯讀查詢）確認正確欄位名與可用參數；
+`includeClosedPrs:true` 是刻意加的，讓已關閉的 PR 也回傳，下面的分類
+邏輯才看得到「有 PR 但不是 OPEN」這個情況（不加這個參數，欄位預設只
+回傳仍是 OPEN 的 PR，會讓「所有 node 都不是 OPEN」這一格永遠打不到）。
 
-- 剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR，取它的 `number`，
-  跳過下面的 fallback，直接進步驟 2。
-- 沒有任何 node，或所有 node 都不是 `OPEN`（`Closes #N` 沒寫，或寫的
-  格式 GitHub 辨識不出來）→ 改用下方「Fallback：留言文字比對」。
-- 超過一個 `OPEN` 的 node（理論上不該發生，`closingPullRequests` 對應
-  的應該是唯一一張正在等 merge 的 PR）→ 無法判斷哪一個才是這輪要驗收
-  的目標，**歸類為「異常」**（見步驟 0），記錄下所有候選 PR 編號讓
-  人類自己判斷，不要自己猜一個當成正確答案。
+依回傳結果判斷，**先看查詢本身有沒有報錯**：
+
+- `gh api graphql` 非 0 結束（上面的 `if` 已經攔下並印出
+  `$GRAPHQL_OUTPUT`）→ **不可以當成「沒有 node」靜默滑進 fallback**：
+  GraphQL schema 又變了、權限出問題、暫時性 API 錯誤都會長這樣，而
+  留言比對 fallback 通常還是找得到 PR，會把這個訊號吃掉、沒有人
+  發現，跟前面提到的欄位名打錯、整支 skill 靜默退化成只跑 fallback
+  是同一種失效模式。**直接歸類為「異常」**（見步驟 0），記錄 `gh`
+  印出的原始錯誤訊息，不嘗試 fallback。
+- 查詢成功、剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR，取它的
+  `number`，跳過下面的 fallback，直接進步驟 2。
+- 查詢成功但沒有任何 node，或所有 node 都不是 `OPEN`（`Closes #N`
+  沒寫，或寫的格式 GitHub 辨識不出來）→ 改用下方「Fallback：留言
+  文字比對」。
+- 查詢成功但超過一個 `OPEN` 的 node（理論上不該發生，
+  `closedByPullRequestsReferences` 對應的應該是唯一一張正在等 merge
+  的 PR）→ 無法判斷哪一個才是這輪要驗收的目標，**歸類為「異常」**
+  （見步驟 0），記錄下所有候選 PR 編號讓人類自己判斷，不要自己猜一個
+  當成正確答案。
 
 #### Fallback：留言文字比對
 
@@ -313,11 +346,12 @@ repo，不需要完整 URL 也能定位），完整的逐條依據留在 PR 留�
   判斷依據就是 PR 上那則帶 `— By Summer (acceptance-review)` 簽名的
   留言存不存在。
 - **掃不到東西一定要講出來，不能安靜結束**：掃全部時 `$TOTAL` = 0、
-  或任何一張落在「異常」分類（找不到對應 PR／找不到驗收條件），都要
-  在 Discord 明確報出來（見「流程」步驟 0、「Discord 摘要模板」）——
-  現階段 `agent-done` 標籤鏈有已知缺口，「這支 skill 一直沒東西可
-  處理」跟「這條鏈根本沒在運作」在 Discord 上長得一模一樣，只有把
-  「掃到 0 張」本身當成一則要發的訊息，才有機會被人類注意到。
+  或任何一張落在「異常」分類（找不到對應 PR／找不到驗收條件／
+  GraphQL 查詢本身報錯），都要在 Discord 明確報出來（見「流程」
+  步驟 0、「Discord 摘要模板」）——標籤鏈雖然已由 persona §4b 補上，
+  但還沒實機驗證過，「這支 skill 一直沒東西可處理」跟「這條鏈沒在
+  運作」在 Discord 上長得一模一樣，只有把「掃到 0 張」本身當成一則
+  要發的訊息，才有機會被人類注意到。
 - 白名單只有 `wm4n/chainbreak`、`wm4n/hangman` 兩個 repo。
 
 ## 不做什麼
@@ -330,21 +364,37 @@ repo，不需要完整 URL 也能定位），完整的逐條依據留在 PR 留�
 - **不 clone repo、不建 worktree、不切分支**——`gh pr diff` 讀到的文字
   diff 就夠。
 - **不逐張各發一則 Discord 訊息**——同一輪的結果彙整成一則摘要。
-- **不修補 `agent-done` 標籤鏈本身的缺口**——`solo-feature-pipeline`
-  步驟 6／persona §4b 成功路徑沒有貼這個 label，是另一個任務要補的
-  範圍。本 skill 的責任只到「缺口存在時，讓掃描結果看得見」為止（見
-  「流程」步驟 0、「鐵則」）。
+- **不驗證 `agent-done` 標籤鏈本身有沒有正常運作**——label 怎麼貼定義
+  在 persona `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b
+  （`solo-feature-pipeline` 步驟 6「建 PR + 通知」本身不處理 label，
+  這段規則定義在呼叫端的 persona §4b），已於 2026-09-20 補齊，但還
+  沒有實機資料證實 Rick/Morty 每次都確實照做。本 skill 的責任只到
+  「鏈有沒有正常運作，讓掃描結果看得見」為止，不負責去改 persona 或
+  去查 Rick/Morty 那端有沒有漏做（見「流程」步驟 0、「鐵則」）。
 
 ## 已知限制
 
-- **`agent-done` 標籤鏈目前有確認過的缺口，掃描很可能長期是 0 張**：
-  查證過 `solo-feature-pipeline/SKILL.md` 步驟 6「建 PR + 通知」與
-  `Rick-CLAUDE_v2.md` §4b，兩處都只寫「開 PR、回報人類」，沒有任何
-  一步會把 `agent-done` 貼上去——§4b 唯一提到 label 的地方是**失敗**
-  路徑（改 `agent-failed`）。這代表在該缺口補齊之前，本 skill 掃全部
-  極可能每次都是 0 張，這是預期中的已知狀態，不是本 skill 的邏輯錯誤；
-  「流程」步驟 0 要求把「0 張」本身當成一則要發的 Discord 訊息，就是
-  為了讓這個狀態被看見、被追蹤，而不是被誤讀成「沒有 PR 完成」。
+- **`agent-done` 標籤鏈已由 persona §4b 補上，但尚未實機驗證**：
+  `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b（2026-09-20 新增）現在
+  明確要求成功路徑收尾三件事——PR 描述寫 `Closes #<issue 編號>`、在
+  issue 貼含 PR 連結的收尾留言、先加 `agent-done` 再移除
+  `agent-active`（`solo-feature-pipeline/SKILL.md` 步驟 6「建 PR +
+  通知」本身不處理 label，這段規則定義在呼叫端的 persona §4b）。這段
+  要求本身還沒有實機跑過，Rick/Morty 每次是否真的照做，目前沒有資料
+  可以確認。**「掃到 0 張」不再是預期中的正常狀態，而是一個值得注意
+  的訊號**：這段期間沒有 PR 走完到可以驗收的狀態，是其中一種合理
+  解釋；但如果連續多輪都是 0 張、而 `grill-me-done`／`ready-for-agent`
+  ／`agent-active` 這些 backlog 狀態明顯有在動（代表確實有單在走
+  開發），就該懷疑是標籤鏈沒被確實遵守，不能再預設「這是已知的正常
+  狀態」而略過不查。「流程」步驟 0 要求把「0 張」本身當成一則要發的
+  Discord 訊息，就是為了讓這個訊號被看見、被追蹤。
+- **usercron 排程尚未部署**：描述裡的「規劃中的 usercron 平日 10:30
+  觸發」目前只有規劃值（`sender_name`＝`SummerAcceptance`），實際要
+  寫進 Summer 容器內的 `/home/node/.openab/cronjob.toml` 才會生效
+  （見 `docs/superpowers/specs/2026-09-20-summer-pm-pipeline-design.md`
+  的觸發機制總表，`openab-ops` 的 `CRONJOB.md` 也註明這四個 job
+  尚未寫入 cronjob.toml、未部署）；部署前，這支 skill 只能靠人類在
+  Discord 主動要求觸發。
 - **簽名冪等不辨識「PR 有沒有更新過」**：PR 驗收後若又被推了新
   commit，留言裡的簽名依然存在，下一輪掃描仍會判定「已驗收」而跳過。
   想要求重新驗收，目前只能由人類指名單張參數
