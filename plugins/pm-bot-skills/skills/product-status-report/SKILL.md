@@ -82,21 +82,11 @@ gh issue list --repo wm4n/hangman    --state open --json number,labels --limit 2
 的 issue 數即可）：`grill-me`、`grill-me-active`、`grill-me-done`、
 `ready-for-agent`、`agent-active`、`agent-done`、`agent-failed`。
 
-**固定用下面這組縮寫，兩個產品各一行**，不要中途改字或省略前綴——
-`grill-me-active`／`agent-active` 只差一個字首，若各自砍成「active」
-會分不出是哪一個：
-
-| 縮寫 | 對應 label |
-| --- | --- |
-| G | `grill-me` |
-| GA | `grill-me-active` |
-| GD | `grill-me-done` |
-| R | `ready-for-agent` |
-| AA | `agent-active` |
-| AD | `agent-done` |
-| AF | `agent-failed` |
-
-這組縮寫在整份回報裡通用，模板見下方「Discord 訊息模板」。
+**Discord 模板裡這七個一律寫完整 label 名稱，不要縮寫**：
+`grill-me-active`／`agent-active`、`grill-me-done`／`agent-done` 這兩
+組只差一個字首，縮寫成 `active`／`done` 會讓人分不出是哪一個，逼讀者
+回頭對照縮寫表——這則訊息的重點是掃一眼就懂，寫全名不需要額外對照，
+模板見下方「Discord 訊息模板」。
 
 ### 4. 本期 merged PR
 
@@ -148,34 +138,34 @@ emoji、換行、markdown 符號）在 2000 字元以內。逼近或超過上限
 
 ```
 📊 產品週報｜<CUTOFF_DATE> 至今
-標籤縮寫：G=grill-me／GA=grill-me-active／GD=grill-me-done／
-R=ready-for-agent／AA=agent-active／AD=agent-done／AF=agent-failed
 
 **Chainbreak**
 GA4：<核心指標 1–2 個，例如「活躍使用者 -12%、結算完成率 68%」>
-Backlog：G1／GA0／GD2／R1／AA1／AD0／AF1
+Backlog：grill-me 1／grill-me-active 0／grill-me-done 2／
+ready-for-agent 1／agent-active 1／agent-done 0／agent-failed 1
 Merged：3 個（#101 #103 #107）
-卡單：AF 1 張（#88）；疑似卡住 0 張
+卡單：agent-failed 1 張（#88）；疑似卡住 0 張
 
 **Hangman**
 GA4：<核心指標>
-Backlog：G0／GA1／GD0／R0／AA2／AD1／AF0
+Backlog：grill-me 0／grill-me-active 1／grill-me-done 0／
+ready-for-agent 0／agent-active 2／agent-done 1／agent-failed 0
 Merged：1 個（#19）
-卡單：AF 0 張；疑似卡住 1 張（#22，逾 30 小時未更新，建議核實 pod 狀態）
+卡單：agent-failed 0 張；疑似卡住 1 張（#22，逾 30 小時未更新，
+建議核實 pod 狀態）
 
 下期建議：<1–2 句具體建議，查無訊號就寫「本期無明顯異常訊號」>
 ```
 
-**Backlog 與卡單兩行一律用縮寫，不要在同一則訊息裡一邊寫縮寫一邊寫
-全名**——`GA`（`grill-me-active`）跟 `AA`（`agent-active`）只差一個
-字首，若卡單那行單獨寫回「agent-failed」而 Backlog 那行寫「AF」，
-容易讓人以為是兩個不同的東西。
+**Backlog 與卡單兩行一律用完整 label 名稱，不要縮寫、也不要在同一則
+訊息裡一邊寫全名一邊寫簡稱**——七個數字本身不長，全名換不到多少字數，
+換到的是不用回頭對照縮寫表就能看懂。
 
-**這個模板的骨架本身不到 500 字元，但套用真實資料後很容易膨脹到接近
-甚至超過上限**——GA4 指標描述變長、merged PR 或卡單張數變多，每一項
-都在往上加，範例看起來精簡不代表套用真實資料後一定在限額內。這正是
-「送出前一定要實測字元數」這條規則存在的原因，不能只憑模板長度的
-直覺判斷。
+**這個模板的骨架本身約 500 字元，寫全名比縮寫多用一點空間，但仍遠低於
+2000 字元上限**；套用真實資料後很容易再膨脹——GA4 指標描述變長、
+merged PR 或卡單張數變多，每一項都在往上加，範例看起來精簡不代表套用
+真實資料後一定在限額內。這正是「送出前一定要實測字元數」這條規則存在
+的原因，不能只憑模板長度的直覺判斷。
 
 ## 鐵則
 
