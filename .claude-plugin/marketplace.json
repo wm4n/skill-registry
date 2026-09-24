@@ -27,7 +27,7 @@
       "name": "solo-bot-skills",
       "source": "./plugins/solo-bot-skills",
       "description": "獨立、不接力的單一 bot 全自動開發流程 skill（Rick/Morty/Summer/Genie 共用）：需求分析到 PR 一手包辦、排程管理、由 agent-dev-poller 觸發的全自動 pipeline（Genie 專用）、jira-grill 需求審視（支援 Jira 票與 GitHub issue 兩種來源）",
-      "version": "1.5.2",
+      "version": "1.6.0",
       "strict": true
     },
     {
