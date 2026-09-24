@@ -57,7 +57,20 @@ Review 真的全數通過後，才跑 `/opsx:archive`——收進正式 spec，�
 
 ### 6. 建 PR + 通知
 
-`gh pr create` 開 PR，然後在**發起這個任務的同一條 thread**回報最初提出需求的人類：PR 連結、這次改了什麼（簡短清單）、確認已通過自我審查。不需要 @mention 任何其他 bot。
+`gh pr create` 開 PR。PR body 的**最後一行**是 PR 簽名，`<Bot>` 代入 persona 署名裡的名字：
+
+```
+— By <Bot> (solo-feature-pipeline)
+```
+
+例：Rick 寫 `— By Rick (solo-feature-pipeline)`、Morty 寫 `— By Morty (solo-feature-pipeline)`。
+
+- **這行是機器讀的**：Rick、Morty 共用 `wm4n` 帳號，PR author 分不出是誰開的，`pr-review-poller` 靠這行把 review 意見送回開 PR 的那隻 bot。格式錯了不會報錯，只會讓這個 PR 的 review 沒有 bot 接手——逐字照抄上面那行再代入名字，開頭是 em dash（U+2014）「—」。
+- 這行就是這份 PR body 的署名，取代 persona 平常的 `— By <Bot>`，整份 body 只出現這一個簽名。
+- persona 規定要寫進 PR 描述的其他內容（例如 `Closes #<issue 編號>`）照常寫，放在簽名之前。
+- 只適用 persona 署名是 `— By <Bot>` 形式的 bot。persona 另有署名規定的（Genie 的 `— Instructed by …`）照 persona 署名：`104cac` 帳號底下只有 Genie 一隻 dev bot，author 就足以辨識。
+
+PR 開好後，在**發起這個任務的同一條 thread**回報最初提出需求的人類：PR 連結、這次改了什麼（簡短清單）、確認已通過自我審查。不需要 @mention 任何其他 bot。
 
 ## 目前刻意不做的事
 
