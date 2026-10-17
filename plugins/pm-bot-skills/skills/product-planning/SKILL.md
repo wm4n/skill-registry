@@ -209,14 +209,16 @@ repo 都建、納入 label 預檢，body 字串零設定、人類隨手可加。
    多任何一個字都不算。要補充理由請寫在第二行以後。人類對這張單的其他討論、
    補充、提問都不會讓它重新被收養。
 
-   用下面這段判斷（不要自己目測；字串規則只寫在這裡的 jq，與上面的說明一致）：
+   用下面這段判斷（不要自己目測；字串規則只寫在這裡的 jq，與上面的說明一致）。trim 用
+   明確字元類（tab、空白、NBSP、全形空白）而不用 `\s`、空 body 先補空字串：`gh --jq`
+   的 gojq 與系統 jq 對 `\s` 與 `"" | split` 的行為不同，寫明確才能兩邊結果一致：
 
    ```bash
    # 印出 REVERSED <推翻留言網址>、NOT_REVERSED（有錨點、沒有推翻）或 NO_ANCHOR；
    # 查詢失敗（指令非 0）→ 當作沒有推翻，跳過、不動。REPO／NUM 的拆法同 5b
    gh issue view "$NUM" --repo "$REPO" --json comments --jq '
      [.comments[] | {a: .author.login, at: .createdAt, u: .url,
-        h: ((.body // "") | split("\n")[0] | gsub("^[\\s\u3000]+|[\\s\u3000]+$"; ""))}]
+        h: ((.body // "") | split("\n") | (.[0] // "") | gsub("^[\t \u00a0\u3000]+|[\t\r \u00a0\u3000]+$"; ""))}]
      | ([.[] | select(.a == "wman-pm" and (.h | startswith("依人類決定不收養"))) | .at] | max) as $anchor
      | if $anchor == null then "NO_ANCHOR"
        else ([.[] | select(.a == "wm4n" and .at > $anchor and (.h | test("^(做|收養)[。.！!]?$")))] | first) as $r

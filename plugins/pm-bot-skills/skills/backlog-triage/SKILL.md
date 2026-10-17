@@ -396,12 +396,15 @@ echo "esc_stage=$ESC_STAGE last_grill_me_done=$GMD_AT last_escalation=$ESC_AT"
 - `esc_stage=grill`（最後一則升級留言早於最後一次 `labeled grill-me-done`）→ 視為
   grill 內已由人類回答並處理完，**不需要**人類在 triage 再明確說「可以做」，照一般
   流程做放行判斷：**五類檢查（第 1–4 類）照常完整做**（依需求共識與 body 判斷，
-  人類在 grill 裡的回答已經反映在需求共識裡）、重做次數與 WIP 照常查。下面「同一件
+  人類在 grill 裡的回答已經反映在需求共識裡；需求共識裡已記載人類在 grill 中明確同意
+  的五類事項不再升級，只升級新的、不同的卡點）、重做次數與 WIP 照常查。下面「同一件
   事」那套規則不適用。
 - `esc_stage=triage` → 照下面「同一件事」的規則，要人類明確說可以做。
 - `esc_stage=FAILED`（任一查詢失敗、或 timeline 找不到 `grill-me-done` 事件）→
   **fail-closed**，當成 `triage`：要人類明確同意。查不到時間就放行，等於把 triage
   階段人類沒點頭的單送進開發。
+- `esc_stage=none`（查詢成功但沒找到升級留言——進這一節的前提是已經有升級留言，
+  沒找到代表 jq 與你讀到的不一致）→ 比照 `FAILED`，fail-closed 當成 `triage`。
 - 段 2（`agent-failed`）不做這個分辨，照下面的規則。
 
 （🕘 2026-10-18 改：原本不分階段，只要有升級留言、沒有 label，段 1 一律要等 `wm4n`
