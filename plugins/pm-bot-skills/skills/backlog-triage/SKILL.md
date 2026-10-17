@@ -215,6 +215,11 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 # 開頭清空：不沿用上一張單（或上一次呼叫）留下的值
 REWORK=FAILED; FAILED_N=; REJECT_N=; LAST_FAILED_AT=; LAST_ACTIVE_AT=; WORKER_COMMENT=NOT_CHECKED
 LABEL_STATE=NOT_CHECKED; POLLER_OWNS=NOT_CHECKED; CMT=; BASE=
+# 留言是誰的：與 poller 的 dispatch.py role() 逐字對齊（帳號優先；2026-10-02T16:00:00Z（台北
+# 10-03 00:00）兩組分離之前，所有 bot 共用 wm4n 帳號發言，只能靠「— By Rick／Morty／Summer」簽名補判，
+# 引用行（> 開頭）不算；之後只認帳號）。兩邊不一致的話，Summer 與 poller 對「人類回覆了沒有」會
+# 判斷不同，搶同一張單。改這裡要對照 dispatch.py 的 _SIGNATURE_CUTOFF、_SIGNATURES、_signature 一起改
+ROLE_JQ='def role: if (.author.login == "wman-dev" or .author.login == "wman-review") then "worker" elif .author.login == "wman-pm" then "pm" elif ((.createdAt | type) == "string" and .createdAt < "2026-10-02T16:00:00Z") then ([(.body // "") | splits("\r\n|[\n\r\u000b\u000c\u001c\u001d\u001e\u0085\u2028\u2029]") | select(test("^[\t \u001f\u00a0\u1680\u2000-\u200a\u202f\u205f\u3000]*>") | not) | if (contains("— By Rick") or contains("— By Morty")) then "worker" elif contains("— By Summer") then "pm" else empty end] | first // "human") else "human" end;'
 # timeline 會分頁；--paginate 時 --jq 是逐頁各跑一次，所以每個事件輸出一行再數行數，
 # 不能在 jq 裡用 length（會變成每頁一個數字）
 if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
@@ -231,7 +236,7 @@ if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
   # 段 2 步驟 4 用：最後一次認領之後，Rick/Morty 的最後一則留言（gh 會把 null 印成空行）
   if [ -n "$LAST_ACTIVE_AT" ]; then
     WORKER_COMMENT=$(gh issue view "$NUM" --repo "$REPO" --json comments \
-      --jq "[.comments[] | select((.author.login == \"wman-dev\" or .author.login == \"wman-review\") and .createdAt > \"$LAST_ACTIVE_AT\")] | last | .body") || WORKER_COMMENT=QUERY_FAILED
+      --jq "$ROLE_JQ [.comments[] | select(role == \"worker\" and .createdAt > \"$LAST_ACTIVE_AT\")] | last | .body") || WORKER_COMMENT=QUERY_FAILED
   fi
   # 段 2 用：label 狀態。最後一次認領晚於最後一次 agent-failed，代表單子已被重新認領過、
   # agent-failed 是殘留（例如放行時移除失敗），不是一次新的失敗
@@ -245,10 +250,10 @@ if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
   fi
   # 段 2 用：poller 會不會自己接手（照 poller 的 failed_pending 判斷，兩邊才不會搶同一張）。
   # 基準點 = max(最後一次 labeled agent-failed, 最後一則 Rick/Morty 留言)；基準點之後只要有
-  # 一則作者不是三個 bot 帳號的留言，就算人類回覆、poller 會續作。Summer（wman-pm）的留言
-  # 不算人類，也不移動基準點
+  # 一則 role 是 human 的留言，就算人類回覆、poller 會續作。Summer 的留言（wman-pm，或分離前
+  # 簽 — By Summer 的）不算人類，也不移動基準點
   if CMT=$(gh issue view "$NUM" --repo "$REPO" --json comments \
-    --jq '.comments[] | "\(.createdAt) \(if (.author.login == "wman-dev" or .author.login == "wman-review") then "worker" elif .author.login == "wman-pm" then "pm" else "human" end)"'); then
+    --jq "$ROLE_JQ"' .comments[] | "\(.createdAt) \(role)"'); then
     BASE=$( { printf '%s\n' "$LAST_FAILED_AT"; printf '%s\n' "$CMT" | awk '$2 == "worker" {print $1}'; } | grep . | sort | tail -n 1)
     if [ -z "$BASE" ]; then
       POLLER_OWNS=no
@@ -281,7 +286,11 @@ printf '%s\n' "$WORKER_COMMENT"
   續作。**這張歸 poller，Summer 不修、不放行**——兩條路同時動會搶同一張單。
   這個判斷刻意和 poller 的 `failed_pending` 用同一套規則：只看「最後一則留言是
   不是 `wm4n`」的話，Summer 自己的 `## Summer 已修正規格` 留言會把人類的回覆
-  蓋過去，Summer 以為沒人回覆，poller 卻照樣續作。
+  蓋過去，Summer 以為沒人回覆，poller 卻照樣續作。「誰的留言」也和 poller 用同一套
+  （`ROLE_JQ`，對齊 `dispatch.py` 的 `role()`；2026-10-18 補）：兩組分離（UTC
+  2026-10-02T16:00:00Z）之前 bot 都用 `wm4n` 帳號發言，只看帳號會把那時候簽
+  `— By Rick`／`— By Morty` 的留言當成人類回覆，Summer 判 `poller_owns=yes`、poller
+  卻不續作，這張單兩邊都不動。
 - `poller_owns=FAILED`／`NOT_CHECKED`：判斷不了，不修、不放行。
 - `label_state=inconsistent`：最後一次認領晚於最後一次 `agent-failed`，代表
   單子已經被重新認領過，`agent-failed` 是殘留的 label，不是一次新的失敗。
@@ -662,7 +671,8 @@ TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d)
 HEADING="## Summer 規格修正（${TODAY}）"
 if CUR_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
   # 今天已經附加過一段（同一天重跑，上次沒走到 6c）：從那段標題起整段換掉，不附加第二段。
-  # 修正段一律附加在最後面，所以從今天的標題到結尾都是 Summer 寫的，人類原文不受影響
+  # 修正段一律附加在最後面，標題之前的人類原文不受影響；但人類若在今天這段下方另外寫了字，
+  # 會跟著這段一起被換掉（見下方說明：人類要補充請留言，不要寫進這段）
   case "$CUR_BODY" in
     *"$HEADING"*) BASE_BODY="${CUR_BODY%%"$HEADING"*}" ;;
     *) BASE_BODY="$CUR_BODY" ;;
@@ -696,6 +706,9 @@ fi
   - 標題日期由 `TODAY` 自動產生（台北時間），不要手打。之前**別天**附加過的修正
     段不動，在最後面再附加今天的一段，最新一段為準；**今天**已經附加過的就整段
     換掉，不會出現兩段同日期的修正段。
+  - **同日取代會刪掉人類寫在 Summer 段落下方的文字**：從今天的標題到 body 結尾整段
+    換掉，人類若直接在這段下面補了字，同一天重跑時會一起消失。人類要補充規格，
+    應該在 issue 留言，不要直接寫進 Summer 的修正段。（2026-10-18 補）
   - 附加段**不寫 `— By Summer` 簽名**：body 裡出現這串字，`summer-grill-responder`
     會把這張人類的單誤認成 Summer 開的單（與 `product-planning` 收養時「不在人類
     的 body 補簽名」同一個理由）。標題已經寫明是 Summer 的修正，紀錄與簽名放在
@@ -757,7 +770,9 @@ EOF
 `gh issue edit --body` 是整段覆蓋，不留紀錄的話事後沒有人分得出「這是誰、
 什麼時候、為什麼改的」。變更摘要要點名**改了哪個段落、新增或刪除了什麼
 內容**，不能只寫「已更新」。6c 留言失敗 → 不放行，記進摘要；下一輪因為沒有
-留言會重修一次（多附加一段同內容的修正段），比放行一張沒有紀錄的單好。
+留言會重修一次（同一天重跑會把今天那段整段換掉；隔天才重跑則會在最後再附加一段
+新日期的修正段），比放行一張沒有紀錄的單好。（2026-10-18 改：原文寫「多附加一段
+同內容的修正段」，同日取代之後已不成立。）
 
 **7. 看重做次數**（用步驟 2 那次執行印出的 `rework`）：
 
