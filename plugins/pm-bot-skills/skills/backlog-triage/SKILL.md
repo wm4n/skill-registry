@@ -7,12 +7,13 @@ description: >-
   （訊息「執行 backlog-triage skill」，sender_name＝SummerTriage，時程以
   CRONJOB.md 為準），或人類在 Discord 提出同類請求（如「排一下優先序」
   「看看卡住的單」「這張能改回去了嗎」）時觸發。放行不等人類點頭，但每次
-  放行前必查三道限制：落在 needs-human 五類就改貼 needs-human 並 @ 人類、
+  放行前必查三道限制：落在 needs-human 五類就改貼 needs-human 並留言說明、
   重做次數（agent-failed 次數加驗收不通過次數）達 2 就改貼 needs-human、
-  兩個 repo 的 agent-active 加 ready-for-agent 合計達 2（WIP 上限）就停止
-  放行。label 一律先加 ready-for-agent 再移除 grill-me-done／agent-failed。
-  排序、修規格、放行、升級都在 issue 留言（簽名 — By Summer），Discord 只
-  放摘要。ready-for-human 歸 product-planning，帶 needs-human 的單一律不動。
+  兩個 repo 的 agent-active 加 ready-for-agent，再加被送回重做中的 agent-done
+  合計達 2（WIP 上限）就停止放行。label 一律先加 ready-for-agent 再移除
+  grill-me-done／agent-failed。排序、修規格、放行、升級都在 issue 留言（簽名
+  — By Summer），Discord 只放不帶 @ 的摘要（@ 人類由主機端 human-notifier 發）。
+  ready-for-human 歸 product-planning，帶 needs-human 的單一律不動。
 ---
 
 # Backlog Triage
@@ -32,8 +33,9 @@ description: >-
 >    自動放行、驗收送回三條路接起來就是一個會一直燒 Rick/Morty 額度的迴圈，
 >    這個上限是那個迴圈的費用防線。
 > 3. **WIP 上限 `WIP_MAX = 2`**：兩個 repo 的 open `agent-active` 加
->    `ready-for-agent` 合計達 2（Rick、Morty 各一張）就停止放行，剩下的留到
->    下一輪。同時開太多張會讓兩隻 bot 同時撞用量上限，每張都做不完。
+>    `ready-for-agent`，再加「被驗收送回、正在重做」的 `agent-done`，合計達 2
+>    （Rick、Morty 各一張）就停止放行，剩下的留到下一輪。同時開太多張會讓兩隻
+>    bot 同時撞用量上限，每張都做不完。
 
 ## 觸發與參數
 
@@ -99,18 +101,10 @@ worktree 都還在它的容器裡，接著做比從頭開一張新單省。段 3
 ### 貼 `needs-human` 的固定順序（順序不可換）
 
 1. **加 `needs-human` label**（`gh issue edit "$NUM" --repo "$REPO"
-   --add-label needs-human`）。**這一步失敗就停在這裡**：不發 @、不留言、
+   --add-label needs-human`）。**這一步失敗就停在這裡**：不留言、
    什麼都不留下。因為什麼都沒貼，下一輪看到的還是原樣，自然會重試；若先貼
-   了留言或 @ 再發現 label 加不上，人類會被叫來看一張實際上沒有任何標記的單。
-2. **在 `bot-notify`（頻道 ID `1526283579309690990`）發一則 @ 人類
-   `<@824092654060830770>` 的訊息並附 issue 連結**，每張單用一句話寫明
-   「卡在第幾類、要決定什麼」，讓人類不點進去也知道輕重。**整輪只發這一則
-   @**：同一輪有多張就合併成一則，不要逐張各 @ 一次（合併後仍須 ≤ 2000
-   字，真的放不下就把超出的連結接在同一則的後續訊息，@ 只放第一則）。
-   Summer 若不是在 `bot-notify` 執行（人類在別的頻道／討論串要求、或 usercron
-   的回覆頻道），那個地方照常貼**不帶 @ 的**純文字摘要，@ 只留給
-   `bot-notify` 這一則——同一件事讓人類被通知兩次，只會讓人學會忽略通知。
-3. **在 issue 上留言**，第一行固定寫 `## 需要人類決定（needs-human）`：
+   了留言再發現 label 加不上，那則留言之後會被讀成「人類已處理完」。
+2. **在 issue 上留言**，第一行固定寫 `## 需要人類決定（needs-human）`：
 
 ```bash
 gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
@@ -132,6 +126,12 @@ EOF
 )"
 ```
 
+3. **不要自己 @ 人類**（2026-10-17 改，Ruling R17：原本第 2 步是「在 `bot-notify`
+   @ 人類一次」，但本 skill 由 usercron 在 `summer-pm` 的 thread 裡跑，@ 送不到
+   `bot-notify`）。主機端 `human-notifier.sh` 看到 `labeled needs-human` 事件就會
+   在 `bot-notify` @ 人類一次，並附上第 2 步那則留言的連結。所以順序是
+   label → 留言 → poller @；Discord 摘要不帶 @。
+
 第 5 類的留言要寫出重做次數怎麼算出來的（幾次 `agent-failed`、幾則驗收
 不通過），並提醒人類：`agent-failed` 的單在移除 `needs-human` 之後，
 人類的回覆本身就會讓 poller 叫原本那隻 bot 續作，不用另外改 label。
@@ -142,10 +142,10 @@ EOF
 依人類回覆續作，`grill-me-done` 由本 skill 下一輪依人類的決定放行）。
 
 label 放第一步，是因為 label 一貼上，各 poller 就立刻開始跳過這張單、停止
-燒額度；通知放在留言之前，是因為「人類盡快知道」比「說明寫完整」更要緊。
-**接受的風險**：若在 @ 之後、留言之前被中斷，人類已經被通知、`needs-human`
-也已在身上（poller 都會跳過），只是 issue 上少了那則說明——人類點進去
-看不到細節，但 @ 訊息裡已有一句話的概要，不會卡死，也不需要補做。
+燒額度；通知以 label 事件為準（不是留言），所以就算留言還沒貼，人類也會被通知。
+**接受的風險**：若在 label 之後、留言之前被中斷，`needs-human` 已在身上（poller
+都會跳過），human-notifier 照樣 @ 人類（訊息註明「還沒有說明留言」），只是 issue
+上少了那則說明——人類點進去看不到細節，不會卡死，也不需要補做。
 
 **絕不重新加回 `needs-human`**：issue 上已有 Summer 的升級留言、但沒有
 `needs-human` label，代表人類處理完並移除了它，不是「做到一半」。怎麼接著
@@ -176,8 +176,8 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 放行；不要憑印象當作 label 存在。段 3 只讀不寫，照常列出。
 
 缺的 label 不要自己建（改 repo 設定屬於 `needs-human` 第 2 類），改成：
-摘要寫明哪個 repo 缺哪個 label（或「label 查詢失敗」），並在 `bot-notify`
-的那一則 @ 裡請人類建立（與同輪的 `needs-human` 升級合併，整輪仍只 @ 一次）。
+摘要寫明哪個 repo 缺哪個 label（或「label 查詢失敗」），請人類建立。摘要不帶 @
+（見「已知限制」：這件事不在 human-notifier 的通知範圍內）。
 
 ### 留言怎麼比對：固定標題
 
@@ -292,8 +292,15 @@ printf '%s\n' "$WORKER_COMMENT"
 ### WIP
 
 **WIP ＝ 兩個 repo 的 open issue 裡，帶 `agent-active` 或 `ready-for-agent`
-的張數合計**；帶 `needs-human` 的不算（它在等人，不佔開發名額）。同一張同時
-帶兩個 label 只算一次：
+的張數，加上「被驗收送回、正在重做」的 `agent-done` 張數，合計**；帶
+`needs-human` 的不算（它在等人，不佔開發名額）。同一張同時帶兩個 label 只算一次。
+
+「被驗收送回、正在重做」＝ issue 帶 `agent-done`，而且它的 open PR 在**目前的
+head SHA** 上有 `wman-pm` 的 `CHANGES_REQUESTED` review（Ruling R19，2026-10-17）：
+`acceptance-review` 送回時 label 留著 `agent-done`，但 Rick／Morty 會被
+`pr-review-poller` 叫回去補 commit，照樣佔一隻 bot。不算它的話，送回的單一多，
+放行就會超過兩隻 bot 的實際名額。作者推了新 commit（head 變了）之後就不再算，
+等下一次驗收決定。
 
 ```bash
 WIP=0
@@ -304,12 +311,37 @@ for R in wm4n/chainbreak wm4n/hangman; do
   else
     WIP=FAILED; break
   fi
+  # R19：agent-done、沒有 needs-human，而且對應 PR 的目前 head 上有 wman-pm 的 Request changes
+  if DONE_ISSUES=$(gh issue list --repo "$R" --state open --label agent-done --limit 200 --json number,labels \
+       --jq '.[] | select(all(.labels[]; .name != "needs-human")) | .number') \
+     && PRS=$(gh pr list --repo "$R" --state open --limit 200 --json number,headRefOid,closingIssuesReferences \
+       --jq '.[] | "\(.number) \(.headRefOid) \([.closingIssuesReferences[].number] | join(","))"'); then
+    REWORKING=
+    while read -r PN SHA CLOSES; do
+      [ -z "$PN" ] && continue
+      for I in $(printf '%s' "$CLOSES" | tr ',' ' '); do
+        printf '%s\n' "$DONE_ISSUES" | grep -qx "$I" || continue
+        # 查不到 review 就當作查詢失敗：少算一張可能多放行一張，寧可這輪不放行
+        if RV=$(gh api "repos/$R/pulls/$PN/reviews" --paginate \
+             --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$SHA\") | .id"); then
+          [ -n "$RV" ] && REWORKING="$REWORKING $I"
+        else
+          WIP=FAILED; break 3
+        fi
+      done
+    done <<< "$PRS"
+    # 同一張 issue 可能被兩張 PR 指到，去重後再加
+    WIP=$((WIP + $(printf '%s\n' $REWORKING | grep . | sort -u | grep -c .)))
+  else
+    WIP=FAILED; break
+  fi
 done
 echo "WIP=$WIP"
 ```
 
 `gh issue list --label a --label b` 是「同時帶兩個」，不是「帶其中一個」，所以
-這裡撈全部 open issue 再用 jq 篩。
+這裡撈全部 open issue 再用 jq 篩。`break 3` 跳出最外層的 repo 迴圈：任何一個
+查詢失敗，`WIP` 都維持 `FAILED`，不會被後面的加法蓋掉。
 
 - **WIP ≥ 2 → 本輪停止放行**，剩下的單留到下一輪（修規格、升級不受影響）。
 - **查詢失敗（`WIP=FAILED`）→ 當作已滿，本輪不放行**，摘要寫明。
@@ -397,12 +429,11 @@ poller 撿得到它**，也不會有任何錯誤訊息。步驟 4 已經成功�
        記進摘要，下一輪段 2 會從步驟 5 接著做、重新放行；若看到的是
        `agent-active`＋`agent-failed`（poller 在回滾前一刻認領了），改走下一項。
      - 已經是 `agent-active`＋`agent-failed`（poller 已認領）→ **label 狀態
-       不一致**，不要再動 label。記進摘要，並在 `bot-notify` 的那一則 @ 裡
-       （併入整輪唯一的 @）寫：「請確認最後只留 `agent-active`（必要時補回
+       不一致**，不要再動 label。記進摘要（不帶 @），寫：「請確認最後只留 `agent-active`（必要時補回
        `agent-active` 並移除 `agent-failed`）」——poller 可能已經把
        `agent-active` 拿掉了，所以不能只說「移除 `agent-failed`」。之後的段 2
        會因為 `label_state=inconsistent` 不再碰這張，不會重複放行。
-     - 回滾也失敗 → 記進摘要並併入那一則 @。
+     - 回滾也失敗 → 記進摘要。
 
 **6. 最後在 issue 留言記錄放行**（label 都換好才留言，紀錄才不會寫到沒發生
 的事）：
@@ -778,7 +809,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
      `ready-for-agent`，段 2 步驟 1 補做或不動之後 label 仍未收斂的）；
    - 「規格修正未完成（改 body、確認或紀錄留言失敗），下一輪重修」。
 2. **帶 `needs-human` 的 open 單**——提醒還有哪些在等人類決定。**只放在摘要，
-   不再 @**：這些單升級當時已經 @ 過，每輪重 @ 只會讓人學會忽略通知。
+   不 @**：這些單貼上 label 時 human-notifier 已經 @ 過，每輪重 @ 只會讓人學會
+   忽略通知。
 
 ## 段 4：`ready-for-human` 歸 `product-planning`
 
@@ -799,10 +831,9 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 查詢或操作失敗而沒做的項目與原因。每項一句話加 issue 連結，完整理由在 issue
 留言裡，不要把留言全文貼進 Discord。
 
-單則訊息上限 2000 字，超過會被截斷。@ 人類只有 `bot-notify` 那一則（規則見
-「貼 `needs-human` 的固定順序」），其他地方的摘要不帶 @。Summer 若就是在
-`bot-notify` 執行，摘要與那一則 @ 可以合併成同一則訊息，**但合併後必須 ≤ 2000
-字**，超過就把 @ 單獨成一則先發，摘要另發一則。
+單則訊息上限 2000 字，超過會被截斷。**摘要不帶任何 @**（2026-10-17 改，R17）：
+`needs-human` 的通知由主機端 `human-notifier.sh` 依 label 事件發，本 skill 在
+`summer-pm` 的 thread 裡發的 @ 本來就送不到 `bot-notify`。
 
 ## 鐵則
 
@@ -821,15 +852,16 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
   依據寫「這部分無法查證」，不編一個聽起來合理但沒有查證的訊號。
 - **label 一律先加後移除**：放行先加 `ready-for-agent`、確認加上了，才移除
   `grill-me-done`／`agent-failed`。升級時原本的流程 label 留著不移除。
-- **貼 `needs-human` 的順序固定：加 label → 單一 @ → 留言（第一行
-  `## 需要人類決定（needs-human）`）**；加 label 失敗就整個停手。已有升級
+- **貼 `needs-human` 的順序固定：加 label → 留言（第一行
+  `## 需要人類決定（needs-human）`）**，@ 人類由 `human-notifier.sh` 依 label 事件
+  發；加 label 失敗就整個停手。已有升級
   留言卻沒有 label，是人類處理完移除的，**絕不重新加回**；只有之後出現新的
   重做事件，才為那個新事件重新升級。
 - **帶 `needs-human` 的 issue 一律不動**，只列進段 3 的提醒。
 - **`agent-failed` 的單歸 poller 時（`poller_owns=yes`），Summer 不修、不放行**；
   判斷規則照 poller 的 `failed_pending`，不自己另訂。label 狀態不一致
   （`label_state` 不是 `ok`）的單也不修、不放行，只列進段 3。
-- **整輪只 @ 人類一次，且只在 `bot-notify`**。
+- **不在 Discord @ 任何人**：通知人類是主機端 `human-notifier.sh` 的事（R17）。
 - **排序只依產品價值與數據**，不做顆粒度拆解、不做技術可行性把關——那是
   實際執行開發的 Rick/Morty 的職責。WIP 上限是固定的費用防線，不是排序因素：
   不要因為「這張比較小」就讓它插隊。
@@ -858,14 +890,17 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
   `ready-for-agent`」，那是改寫前的舊規定；`needs-human` 五類的定義仍以 persona
   為準。
 - **`needs-human` label 需先存在於兩個 repo**：本 skill 不建 label，缺的話
-  label 預檢會擋下該 repo 的段 1、段 2，並在 `bot-notify` 請人類建立。
+  label 預檢會擋下該 repo 的段 1、段 2，並在摘要請人類建立。
 - **放行時移除 `agent-failed` 失敗**：poller 每 10 分鐘認領一次，所以單子
   很容易變成 `agent-active`＋`agent-failed`，poller 會把它當成自己轉換到一半而
   移除 `agent-active`。本 skill 的對策是當場重試一次，還沒被認領就回滾
-  `ready-for-agent`（見放行程序步驟 5）；已經被認領的話只能 @ 人類確認最後
+  `ready-for-agent`（見放行程序步驟 5）；已經被認領的話只能在摘要請人類確認最後
   只留 `agent-active`，並靠 `label_state=inconsistent` 防止段 2 再放行一次。
   只有步驟 5 連續失敗才會走到這裡。
-- **升級在「@ 之後、留言之前」被中斷**：人類已被通知、`needs-human` 已在
-  身上，poller 都會跳過，只是 issue 上缺說明留言；這是接受的取捨，不補做。
+- **升級在「label 之後、留言之前」被中斷**：`needs-human` 已在身上，poller 都會
+  跳過，human-notifier 照樣 @ 人類，只是 issue 上缺說明留言；這是接受的取捨，不補做。
   若人類之後只移除 label、沒有留言，這張單沒有升級留言可供辨認，可能再被升級
-  一次、多發一次 @。機率極低，接受。
+  一次、多一次通知。機率極低，接受。
+- **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @）：缺
+  `ready-for-agent`／`needs-human` label、放行時 label 狀態不一致。人類要看
+  `summer-pm` 的摘要才會知道（R17 之前寫的「併入那一則 @」實際上也送不到）。
