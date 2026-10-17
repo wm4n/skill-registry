@@ -532,7 +532,7 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
 ```
 
 兩個 repo 合在一起，依 issue 編號由小到大逐張處理（固定順序，WIP 不夠時每次
-先輪到的是同一批單）。對每一張依序做：
+先輪到的是同一批單）。**每一張都要看完**，對每一張依序做：
 
 **1. 先看 label**：
 
@@ -550,7 +550,7 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
   `agent-failed` 事件」）。
 - `label_state=inconsistent` → 跳過，段 3 列出（原因「label 狀態不一致：最後
   一次認領晚於最後一次 `agent-failed`」）。這通常是之前放行時移除
-  `agent-failed` 失敗、poller 又已經認領過留下的殘留；照常修規格、放行，同一張
+  `agent-failed` 失敗、poller 又已經認領過留下的殘留；若照常修規格、放行，同一張
   單就會被放行第二次。
 - `poller_owns=yes` → 跳過，段 3 列出（原因「人類已回覆，交給 poller 接手」）。
   poller 看到人類在失敗之後回覆，會自己把單子叫回原本那隻 bot 續作；Summer 這時
@@ -588,36 +588,27 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
   這張到此為止。
 - 不落在五類 → 修規格。只補齊／修正 Rick/Morty 指出的那個缺口（漏了驗收
   條件、範圍描述不清、跟現有功能衝突……），不整段砍掉重寫——除非讀完說明後
-  發現整體方向就錯，才需要大改。
-  - **issue 作者是 `wman-pm`**（Summer 自己開的單）→ 改 body：
+  發現整體方向就錯，才需要大改。照下面 6a → 6b → 6c 的順序做，**順序不可換**。
 
-    ```bash
-    gh issue edit "$NUM" --repo "$REPO" --body "$UPDATED_BODY"
-    ```
+`## Summer 已修正規格` 留言是步驟 5 判斷「修過了沒」的依據，所以一定要等 body
+確認改好之後才貼。先貼留言、body 卻沒改成功的話，下一輪看到留言就不會再修，
+直接把一份壞掉的規格放行給 Rick/Morty。**6a 的 `gh issue edit` 失敗，或 6b
+確認不通過 → 不貼 6c 的留言、不放行**，記進摘要，下一輪會重新從步驟 5 開始
+（沒有留言，所以會重修）。
 
-  - **作者不是 `wman-pm`**（人類開、Summer 收養的單）→ **人類寫的原文一個字
-    都不改**，在 body **最後面附加**一段 `## Summer 規格修正（YYYY-MM-DD）`，
-    寫修正後的需求與驗收條件。修正一定要進 body：Rick/Morty 的開發流程讀的是
-    issue body，不保證會讀留言，只寫在留言裡等於沒修。做法見下面「附加修正段」。
+**6a. 改 body**，依 issue 作者分兩種：
 
-  修完立刻貼一則記錄變更的留言（第一行逐字照抄，步驟 5 靠它判斷修過了沒）：
+- **作者是 `wman-pm`**（Summer 自己開的單）→ 直接改：
 
-```bash
-gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
-## Summer 已修正規格
+  ```bash
+  gh issue edit "$NUM" --repo "$REPO" --body "$UPDATED_BODY"
+  ```
 
-依 Rick/Morty 的規格問題（<留言連結>）調整規格。
-
-變更摘要：<改了哪個段落，新增／刪除了什麼內容；作者不是 wman-pm 時寫「已在 body 末尾附加『## Summer 規格修正（YYYY-MM-DD）』」並摘要內容>
-
----
-— By Summer
-EOF
-)"
-```
-
-**附加修正段**（只用於作者不是 `wman-pm` 的單）：先讀回目前的 body，讀取失敗
-就停手——拿空字串去 `--body` 會把人類的原文整段清掉：
+- **作者不是 `wman-pm`**（人類開、Summer 收養的單）→ **人類寫的原文一個字
+  都不改**，在 body **最後面附加**一段 `## Summer 規格修正（YYYY-MM-DD）`，
+  寫修正後的需求與驗收條件。修正一定要進 body：Rick/Morty 的開發流程讀的是
+  issue body，不保證會讀留言，只寫在留言裡等於沒修。先讀回目前的 body，讀取
+  失敗就停手——拿空字串去 `--body` 會把人類的原文整段清掉：
 
 ```bash
 if CUR_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
@@ -636,24 +627,51 @@ APPEND=$(cat <<'EOF'
 - <條件二>
 EOF
 )
-  gh issue edit "$NUM" --repo "$REPO" --body "$(printf '%s\n\n%s\n' "$CUR_BODY" "$APPEND")"
+  gh issue edit "$NUM" --repo "$REPO" --body "$(printf '%s\n\n%s\n' "$CUR_BODY" "$APPEND")" || echo "改 body 失敗"
 else
   echo "讀取 body 失敗，本輪不修這張"
 fi
 ```
 
-- `YYYY-MM-DD` 換成今天的日期。之前已經附加過修正段（上一次失敗修的）就不動
-  它，在最後面再附加一段新日期的；最新一段為準。
-- 附加段**不寫 `— By Summer` 簽名**：body 裡出現這串字，`summer-grill-responder`
-  會把這張人類的單誤認成 Summer 開的單（與 `product-planning` 收養時「不在人類
-  的 body 補簽名」同一個理由）。標題已經寫明是 Summer 的修正，紀錄與簽名放在
-  `## Summer 已修正規格` 留言裡。
-- 改完用 `gh issue view "$NUM" --repo "$REPO" --json body` 確認人類原文還在、
-  附加段在最後面；不對就記進摘要，不放行。
+  - `YYYY-MM-DD` 換成今天的日期。之前已經附加過修正段（上一次失敗修的）就不動
+    它，在最後面再附加一段新日期的；最新一段為準。
+  - 附加段**不寫 `— By Summer` 簽名**：body 裡出現這串字，`summer-grill-responder`
+    會把這張人類的單誤認成 Summer 開的單（與 `product-planning` 收養時「不在人類
+    的 body 補簽名」同一個理由）。標題已經寫明是 Summer 的修正，紀錄與簽名放在
+    6c 的留言裡。
+
+**6b. 確認 body 真的改好了**：
+
+```bash
+gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'
+```
+
+- 作者是 `wman-pm`：看得到 6a 改的那個段落是新內容。
+- 作者不是 `wman-pm`：人類原文仍完整在前面，最後面是這次新附加、標題日期是
+  今天的 `## Summer 規格修正（YYYY-MM-DD）`。
+
+不符合（或這個查詢本身失敗）→ 停在這裡：不貼 6c、不放行，記進摘要。
+
+**6c. 最後才貼記錄變更的留言**（第一行逐字照抄，步驟 5 靠它判斷修過了沒）：
+
+```bash
+gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
+## Summer 已修正規格
+
+依 Rick/Morty 的規格問題（<留言連結>）調整規格。
+
+變更摘要：<改了哪個段落，新增／刪除了什麼內容；作者不是 wman-pm 時寫「已在 body 末尾附加『## Summer 規格修正（YYYY-MM-DD）』」並摘要內容>
+
+---
+— By Summer
+EOF
+)"
+```
 
 `gh issue edit --body` 是整段覆蓋，不留紀錄的話事後沒有人分得出「這是誰、
 什麼時候、為什麼改的」。變更摘要要點名**改了哪個段落、新增或刪除了什麼
-內容**，不能只寫「已更新」。
+內容**，不能只寫「已更新」。6c 留言失敗 → 不放行，記進摘要；下一輪因為沒有
+留言會重修一次（多附加一段同內容的修正段），比放行一張沒有紀錄的單好。
 
 **7. 看重做次數**（用步驟 2 那次執行印出的 `rework`）：
 
@@ -662,6 +680,11 @@ fi
 - < 2 → 走「放行程序」（`SRC`＝`agent-failed`；程序第 1 步會重跑「重做次數」
   那整段，確認人類這段時間沒有回覆）。WIP 已滿就留著，下一輪從步驟 5 接著做。
   poller 重新認領時會優先送回之前做過這張的 bot，這裡不用處理。
+
+**段 2 一樣是 WIP 滿只停止放行，不停止修規格與升級**：某張遇到 WIP 滿（或查詢
+失敗）時，記下「本輪不再放行」，後面的單照樣走步驟 1–7——修規格、五類升級、
+重做次數升級都照做，只有步驟 7 的放行跳過。規格先修好，名額一空出來下一輪就能
+直接放行；升級和 WIP 無關，延後只會讓人類晚知道。
 
 ## 段 3：列出 poller 已升級與等人類決定的單
 
@@ -695,7 +718,10 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
    - 「找不到認領紀錄，無法判斷是否規格問題」；
    - 「WIP 已滿，規格已修，等下一輪放行」；
    - 「人類已處理升級但沒有回覆」；
-   - 「重做次數或留言查詢失敗」。
+   - 「重做次數或留言查詢失敗」；
+   - 「已被認領／放行中，label 過渡中，待確認」（同時帶 `agent-active` 或
+     `ready-for-agent`，段 2 步驟 1 沒有處理的）；
+   - 「規格修正未完成（改 body、確認或紀錄留言失敗），下一輪重修」。
 2. **帶 `needs-human` 的 open 單**——提醒還有哪些在等人類決定。**只放在摘要，
    不再 @**：這些單升級當時已經 @ 過，每輪重 @ 只會讓人學會忽略通知。
 
