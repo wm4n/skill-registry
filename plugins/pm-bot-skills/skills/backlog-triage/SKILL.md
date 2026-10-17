@@ -144,7 +144,7 @@ EOF
 label 放第一步，是因為 label 一貼上，各 poller 就立刻開始跳過這張單、停止
 燒額度；通知以 label 事件為準（不是留言），所以就算留言還沒貼，人類也會被通知。
 **接受的風險**：若在 label 之後、留言之前被中斷，`needs-human` 已在身上（poller
-都會跳過），human-notifier 照樣 @ 人類（訊息註明「還沒有說明留言」），只是 issue
+都會跳過），human-notifier 照樣 @ 人類（訊息註明「尚無說明留言」），只是 issue
 上少了那則說明——人類點進去看不到細節，不會卡死，也不需要補做。
 
 **絕不重新加回 `needs-human`**：issue 上已有 Summer 的升級留言、但沒有

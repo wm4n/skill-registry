@@ -333,7 +333,7 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
   ```
 
   - `half=yes` → 升級做到一半：issue 上缺這次的說明。`human-notifier.sh` 看到
-    label 事件時已經 @ 過人類（訊息會註明「還沒有說明留言」），本 skill 不再 @，
+    label 事件時已經 @ 過人類（訊息會註明「尚無說明留言」），本 skill 不再 @，
     只在摘要**點名**列出「needs-human 已貼但沒有升級說明」。不補貼說明留言（不知道
     當初卡在什麼，補了只會亂寫）。
   - `half=no` → 摘要列出「等人類決定中」。
@@ -1298,7 +1298,7 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
 - **第 5 類升級後，人類移除 label、PR head 沒變**：本 skill 一直跳過這個 SHA，
   後續（送回、自己修、關 PR）完全由人類決定。
 - **升級在「label 之後、留言之前」被中斷**：`needs-human` 已在身上，poller 都會
-  跳過；`human-notifier.sh` 依 label 事件照樣 @ 人類（訊息註明「還沒有說明留言」）。
+  跳過；`human-notifier.sh` 依 label 事件照樣 @ 人類（訊息註明「尚無說明留言」）。
   只是 issue 上缺說明留言；不補做（不知道當初卡在什麼），步驟 1 會在摘要點名列出。
   第 5 類這時也還沒貼不通過留言，人類移除 label 後同一個 SHA 會再驗一次、再升級
   一次，機率極低，接受。
