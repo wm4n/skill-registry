@@ -360,8 +360,56 @@ echo "WIP=$WIP"
 ### 人類處理過的升級（有升級留言、沒有 `needs-human`）
 
 issue 上有 `wman-pm` 第一行為 `## 需要人類決定（needs-human）` 的留言、但目前
-沒有 `needs-human` label → 人類已處理並移除了 label。**絕不重新加回**。先判斷
-那次升級和現在是不是**同一件事**：
+沒有 `needs-human` label → 人類已處理並移除了 label。**絕不重新加回**。
+
+**段 1 先分辨升級是在哪個階段貼的**（2026-10-18 新增）：`grill-respond` 在 grill
+期間遇到五類問題也會貼同一個標題的留言（加 `needs-human`、人類在 grill 裡回答後
+移除）。那種升級在 grill 內就已經由人類回答、處理完，回答也已經進了「✅ 需求共識」；
+若照樣要求人類在 triage 再說一次「可以做」，人類通常不會想到要補這句，這張單就會
+每天被跳過、永遠卡在 `grill-me-done`。所以段 1 以這張單**最後一次
+`labeled grill-me-done` 事件**為界，看**最後一則**升級留言落在哪邊（同一次 Bash
+呼叫、開頭清空變數，不沿用上一張單的值）：
+
+```bash
+ESC_STAGE=FAILED; GMD=; ESC=; GMD_AT=; ESC_AT=
+if GMD=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
+     --jq '.[] | select(.event == "labeled" and .label.name == "grill-me-done") | .created_at') \
+  && ESC=$(gh issue view "$NUM" --repo "$REPO" --json comments \
+     --jq '.comments[] | select(.author.login == "wman-pm" and (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "") | startswith("## 需要人類決定（needs-human）"))) | .createdAt'); then
+  GMD_AT=$(printf '%s\n' "$GMD" | grep . | sort | tail -n 1)
+  ESC_AT=$(printf '%s\n' "$ESC" | grep . | sort | tail -n 1)
+  if [ -z "$ESC_AT" ]; then
+    ESC_STAGE=none
+  elif [ -z "$GMD_AT" ]; then
+    # 段 1 的單一定貼過 grill-me-done；timeline 找不到就是狀態說不通，當成 triage 階段（要明確同意）
+    ESC_STAGE=FAILED
+  elif [ "$(printf '%s\n%s\n' "$GMD_AT" "$ESC_AT" | sort | tail -n 1)" = "$ESC_AT" ]; then
+    # 升級留言不早於最後一次 grill-me-done（同一秒也算）→ triage 階段的升級
+    ESC_STAGE=triage
+  else
+    ESC_STAGE=grill
+  fi
+fi
+echo "esc_stage=$ESC_STAGE last_grill_me_done=$GMD_AT last_escalation=$ESC_AT"
+```
+
+- `esc_stage=grill`（最後一則升級留言早於最後一次 `labeled grill-me-done`）→ 視為
+  grill 內已由人類回答並處理完，**不需要**人類在 triage 再明確說「可以做」，照一般
+  流程做放行判斷：**五類檢查（第 1–4 類）照常完整做**（依需求共識與 body 判斷，
+  人類在 grill 裡的回答已經反映在需求共識裡）、重做次數與 WIP 照常查。下面「同一件
+  事」那套規則不適用。
+- `esc_stage=triage` → 照下面「同一件事」的規則，要人類明確說可以做。
+- `esc_stage=FAILED`（任一查詢失敗、或 timeline 找不到 `grill-me-done` 事件）→
+  **fail-closed**，當成 `triage`：要人類明確同意。查不到時間就放行，等於把 triage
+  階段人類沒點頭的單送進開發。
+- 段 2（`agent-failed`）不做這個分辨，照下面的規則。
+
+（🕘 2026-10-18 改：原本不分階段，只要有升級留言、沒有 label，段 1 一律要等 `wm4n`
+明確說可以做。`grill-respond` 改成在 grill 期間自己貼 `needs-human` 之後（同日
+fix wave 第 5 項），這會讓 grill 期間升級過的單在 triage 永遠卡住。）
+
+先判斷那次升級和現在是不是**同一件事**（段 1 只有 `esc_stage` 是 `triage` 或
+`FAILED` 時才走到這裡）：
 
 - **最後一則升級留言之後，沒有新的重做事件**（沒有更晚的 `labeled
   agent-failed`，也沒有更晚的 `## 驗收結果：不通過` 留言）→ 同一件事，人類已
@@ -488,7 +536,8 @@ comment 只含背景、需求範圍、驗收條件、目標 repo，**不含數�
 - **放行做到一半**：同時帶 `ready-for-agent` 或 `agent-active` → 上一輪放行時
   移除 `grill-me-done` 失敗。只補做 `gh issue edit "$NUM" --repo "$REPO"
   --remove-label grill-me-done`，不重留言、不佔 WIP、不重新檢查。
-- 有升級留言、沒有 `needs-human` → 照「人類處理過的升級」判斷；判斷為跳過的
+- 有升級留言、沒有 `needs-human` → 照「人類處理過的升級」判斷（先跑那裡的
+  `esc_stage`：grill 期間的升級照一般流程，不算這一條）；判斷為跳過的
   （人類沒有明確說可以做）不進排序，摘要列一行。不然它每個平日都會收到一則
   「第 N 順位」的排序留言，看起來像 Summer 在推一張人類沒放行的單。
 - 在 `comments` 裡找不到 `jira-grill` 貼的「✅ 需求共識」comment → **視為
@@ -548,7 +597,8 @@ EOF
    前面的步驟剛貼上的）。
 2. **五類檢查（第 1–4 類）**：讀需求共識與 body，這張單要做的事落在第 1–4
    類 → 走「貼 `needs-human` 的固定順序」，不放行，換下一張。過濾時判定為
-   「人類明確說可以做」的單，只看新出現的、不同的卡點（見「人類處理過的升級」）。
+   「人類明確說可以做」的單，只看新出現的、不同的卡點（見「人類處理過的升級」）；
+   `esc_stage=grill` 的單不屬於這種，五類照常完整檢查。
 3. **重做次數**（對這張單跑一次「重做次數」那整段）：≥ 2 → 升級第 5 類，不放行，
    換下一張（人類明確放行、而且升級之後沒有新重做事件的單除外，見「人類處理過
    的升級」）；`FAILED` → 跳過，換下一張。`grill-me-done` 的單也可能有過失敗
