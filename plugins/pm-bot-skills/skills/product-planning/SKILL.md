@@ -171,7 +171,8 @@ spec-only` 遇到 label 不存在，可能直接失敗或建出沒帶 label 的�
 ```bash
 gh api -H "Accept: application/vnd.github.raw+json" repos/wm4n/chainbreak/contents/README.md
 gh api -H "Accept: application/vnd.github.raw+json" repos/wm4n/chainbreak/contents/CLAUDE.md
-gh api repos/wm4n/chainbreak/contents/docs --jq '.[].path'   # 列出 docs/ 檔案，再挑 roadmap／規劃類的讀
+# 列出 docs/ 檔案，再挑 roadmap／規劃類的讀
+gh api repos/wm4n/chainbreak/contents/docs --jq '.[].path'
 ```
 
 hangman 同理把 repo 名換掉。找 roadmap、TODO、「之後要做」「待辦」「已知
@@ -181,18 +182,25 @@ hangman 同理把 repo 名換掉。找 roadmap、TODO、「之後要做」「待
 
 #### 候選的留言檢查（3b、3c 共用）
 
-用步驟 2 取回的 `comments`（作者 `wman-pm` 的留言），對每張候選先看 Summer 留
-過什麼：
+用步驟 2 取回的 `comments`，對每張候選先看 Summer（作者 `wman-pm`）留過
+什麼。**下面的檢查依序進行，第一個符合的就採用，不再往下看**：
 
-- **已有 `## Summer 收養此單` 留言** → 不是全新候選，一律轉去 5b 的「續做」
-  路徑處理（符合續做條件才補，不符合就不動）。續做**不經過、也不受**步驟 4 的
-  預算與排序。
-- **已有 `## 需要人類決定（needs-human）` 留言、目前沒有 `needs-human`
-  label** → 這代表**人類已處理並移除了 label**。**絕不重新加回**。處理方式見
-  下面「人類處理完之後」。
-- **已有 `依人類決定不收養` 留言**（作者 `wman-pm`，見下面「人類處理完之後」）
-  → 一律跳過、不動。
-- 以上留言都沒有 → 全新候選，照下面 3b／3c 的篩選走。
+1. **已有 `## Summer 收養此單` 留言** → 不是全新候選，轉去 5b 的「續做」路徑
+   處理（符合續做條件才補，不符合就不動）。續做**不經過、也不受**步驟 4 的
+   預算與排序。
+2. **已有 `依人類決定不收養` 留言，且在它之後沒有更新的 `wm4n` 留言** →
+   跳過、不動。**若它之後出現了更新的 `wm4n` 留言**，視為人類推翻了原決定：
+   這張單重新成為候選，依那則較新的留言重新判斷（做法同下面「人類處理完
+   之後」，把那則較新的留言當作人類的決定）。
+3. **已有 `## 需要人類決定（needs-human）` 留言、目前沒有 `needs-human`
+   label** → 這代表**人類已處理並移除了 label**。**絕不重新加回**。處理方式
+   見下面「人類處理完之後」。
+4. 以上都不符合 → 全新候選，照下面 3b／3c 的篩選走。
+
+**留言怎麼比對**：上面這幾個固定標題（`## Summer 收養此單`、
+`## 需要人類決定（needs-human）`、`依人類決定不收養`）一律用「留言內容的
+第一行，去掉前後空白後，以這串**完全相同的字串**開頭」判斷，所以寫這幾種
+留言時第一行必須逐字照抄、不可改字或加前綴。
 
 **人類處理完之後（3b、3c 都適用）**：在 Summer 的升級留言**之後**，若出現
 `wm4n` 的留言，且單上沒有任何流程 label（`ready-for-human` 例外，見下），
@@ -211,11 +219,12 @@ label。）Summer 的升級留言之後沒有 `wm4n` 的留言，一律跳過、
 - **人類決定「不做」** → Summer **不收養、不動 label**，只**貼一次**簡短
   留言，第一行固定寫 `依人類決定不收養`，其後一句話說明依據哪則留言，以
   `— By Summer` 簽名結尾。這則留言的用途是讓之後每一輪都能認出「這張單已
-  有結論」而跳過，不要每週重新評估一次；上面的留言檢查看到它就直接略過。
+  有結論」而跳過，不要每週重新評估一次；上面的留言檢查第 2 項看到它就略過，
+  直到人類在它之後再留言推翻為止。
 
 #### 3b. 人類開的 backlog
 
-步驟 2 的 open issue 裡，挑出**沒有任何流程 label** 的：不含 `grill-me`、
+先套用上面的「候選的留言檢查」。步驟 2 的 open issue 裡，挑出**沒有任何流程 label** 的：不含 `grill-me`、
 `grill-me-*`（含 `grill-me-done`）、`ready-for-agent`、`ready-for-human`、
 `agent-*`（`agent-active`／`agent-failed`／`agent-done`…）、`needs-human`、
 `pm-owned`。這些就是人類開了、但還沒有任何 bot 接手的單。含
@@ -234,7 +243,7 @@ gh issue list --repo wm4n/hangman    --label ready-for-human --state open \
   --json number,title,body,labels,comments,author,createdAt
 ```
 
-這是人類標記「要人來決定」而一直沒人處理的單。**先過濾**，下列任一成立就
+先套用上面的「候選的留言檢查」。這是人類標記「要人來決定」而一直沒人處理的單。**先過濾**，下列任一成立就
 跳過、不動：同時帶 `needs-human`、`grill-me*`（含 `grill-me-done`）、
 `agent-*`、`ready-for-agent`、`pm-owned`（代表另有流程或人類已接手，貼
 標記會與之衝突）；或作者是 bot 帳號（`wman-dev`、`wman-review`、
