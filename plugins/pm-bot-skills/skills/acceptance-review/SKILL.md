@@ -15,9 +15,10 @@ description: >-
   先對 base branch 跑同一組指令：base 也紅歸「無法驗證（基線紅）」，不算重做。
   不通過、有衝突或 base 綠 head 紅 → 先算重做次數，未達 2 次用綁 head SHA 的
   Request changes 送回 bot 作者（由主機端 pr-review-poller 觸發作者）；達 2 次
-  改貼 needs-human、不送回；作者不是 bot 帳號只留言。本 skill 不在 Discord
-  @ 任何人。同一個 head SHA 只驗一次；送回做到一半會續做，作者回應了卻沒推新
-  commit 就留停滯通報一次。永不 approve、永不 merge（自動 merge 暫緩，
+  改貼 needs-human、不送回；作者不是 bot 帳號只留言、不送回，由主機端
+  human-notifier 通知人類處理。本 skill 不在 Discord @ 任何人。同一個 head SHA
+  只驗一次；送回做到一半會續做，作者回應了卻沒推新 commit 就留停滯通報（每個
+  SHA 最多 2 次）。永不 approve、永不 merge（自動 merge 暫緩，
   等人類決定是否開放）。帶 needs-human 的單一律不動，不改任何 label。
 ---
 
@@ -485,7 +486,7 @@ start 還在租約內，poller 也認定作者還在處理、不會重送。過�
 | R1 | `mark` 是新的 `start` | **跳過**：Rick/Morty 正在原分支補 commit，現在的 head 可能只改到一半，驗了只會把半成品判成不通過、白白用掉重做額度。摘要計入「作者處理 review 中」 |
 | R3 | `fail_at` 有值，`mark` 的時間晚於參考時間，而且 `mark` 是 `done`、`failed` 或逾時的 `start` | **停滯（作者已回應但未更新）**：作者回應了（提問、反駁、說超出範圍、失敗，或做到一半卡住），PR head 卻沒變。可以通報停滯 → 走 8e；否則跳過，摘要計入「停滯（已通報）」。**絕不重送** |
 | R3' | `rev_at`、`rev_age` 與 `fail_age` 都有值，`mark_after_rev=no`（作者完全沒有回應），而且 `rev_age` ≥ 57600 | **停滯（作者未回應）**：review 送出超過 16 小時，作者連 `start` 都沒貼。`pr-review-poller` 在 review 之後約 10 分鐘內觸發、每 5 小時重送、叫滿 3 次（約 15 小時）就自己 @ 人類；過了 16 小時還完全沒有標記，代表 bot 一直沒醒，或 poller 本身沒在跑。這則是備援通報（poller 沒在跑時，它是唯一會讓人類知道的路）。可以通報停滯 → 8e（原因寫「作者未回應」）；否則跳過，摘要計入「停滯（已通報）」。**絕不重送**。還沒到 16 小時的不符合本列，會落到 R4（摘要改計入「等作者回應（pr-review-poller 觸發中）」，不要算成「已驗過」） |
-| R4 | `head_rec` 有值（目前 SHA 有任何紀錄） | **冪等**，看 `head_rec` 的標題：`## 驗收結果：無法驗證（測試環境）` 或 `## 驗收結果：無法驗證（基線紅）`，而且這次是**指名單張**觸發 → 人類多半修好了環境或 base branch，繼續往下驗；這兩種、排程觸發 → 跳過，摘要計入「無法驗證（等環境修好）」或「無法驗證（等 base 修好）」；其他標題 → 跳過，摘要計入「已驗過」 |
+| R4 | `head_rec` 有值（目前 SHA 有任何紀錄） | **冪等**，看 `head_rec` 的標題：`## 驗收結果：無法驗證（測試環境）` 或 `## 驗收結果：無法驗證（基線紅）`，而且這次是**指名單張**觸發 → 人類多半修好了環境或 base branch，繼續往下驗；這兩種、排程觸發 → 跳過，摘要計入「無法驗證（等環境修好）」或「無法驗證（等 base 修好）」；其他標題 → 跳過，摘要計入「已驗過」。**例外**：落到這裡的 5–16 小時 `start`（R1、R3 都不符合），以及送出未滿 16 小時、作者還沒有任何標記的送回（R3' 不符合），摘要計入「等作者回應（pr-review-poller 觸發中）」，不算「已驗過」（2026-10-18 補） |
 | R5 | `mergeable` 是 `UNKNOWN`（剛 push 完常見） | 跳過，下一輪再看，不算失敗。摘要計入「待 GitHub 算合併狀態」 |
 | — | 以上都不符合 | 繼續步驟 4 |
 
@@ -643,16 +644,20 @@ fi
 **PR 動到測試、測試指令或測試設定，要讓人類看見**：指令雖然來自 base，執行時
 讀的設定檔卻來自 PR head——`analysis_options.yaml` 可以關掉 lint、
 `dart_test.yaml` 可以跳過測試、`pubspec.yaml`／`pubspec_overrides.yaml` 可以換掉
-測試相依、`Makefile` 與工具版本設定（`.tool-versions`、`mise.toml`、`.mise.toml`、
-`mise.local.toml`、`.mise.local.toml`、`.config/mise/`、`.mise/` 底下的檔案）可以
-改掉指令實際做的事或用到的工具版本。這些一律列出來：
+測試相依、`Makefile` 與工具版本設定（`.tool-versions`；mise 的 `mise.toml`、
+`.mise.toml`、`mise.<env>.toml`、`.mise.<env>.toml`（含 `mise.local.toml`）、
+`mise/config.toml`、`mise/config.<env>.toml`，以及 `.config/mise/`、`.mise/` 底下的
+檔案）可以改掉指令實際做的事或用到的工具版本。這些一律列出來（2026-10-18 補
+`mise.<env>.toml` 與 `mise/config.toml`）：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 # 測試指令文件、測試設定檔、測試檔（test/、tests/、integration_test/、*_test.*、test_*）；D 開頭是刪除
 awk -F '\t' '{p = $NF}
   p ~ /(^|\/)(CLAUDE|AGENTS)\.md$/ \
-  || p ~ /(^|\/)(analysis_options\.yaml|dart_test\.yaml|pubspec\.yaml|pubspec_overrides\.yaml|Makefile|\.tool-versions|mise\.toml|\.mise\.toml|mise\.local\.toml|\.mise\.local\.toml)$/ \
+  || p ~ /(^|\/)(analysis_options\.yaml|dart_test\.yaml|pubspec\.yaml|pubspec_overrides\.yaml|Makefile|\.tool-versions)$/ \
+  || p ~ /(^|\/)\.?mise(\.[^\/]+)?\.toml$/ \
+  || p ~ /(^|\/)mise\/config(\.[^\/]+)?\.toml$/ \
   || p ~ /(^|\/)(\.config\/mise|\.mise)\// \
   || p ~ /(^|\/)(test|tests|integration_test)\// \
   || p ~ /(_test\.[a-z]+|(^|\/)test_[^\/]*)$/ {print}' \
@@ -1124,14 +1129,23 @@ printf '\n---\n— By Summer (acceptance-review)\n'
   （`pr-review-poller` 應已重送 3 次並 @ 過人類；這則是 poller 沒在跑時的備援）。
 
 **絕不重送**：同一個 SHA 再送一次，只會得到同樣的回應，而且每送一次都
-燒 Rick/Morty 的額度。改成讓人類知道，每個 SHA 只通報一次。
+燒 Rick/Morty 的額度。改成讓人類知道，每個 SHA 最多通報 2 次（去重規則見步驟 3
+的「停滯通報的去重」：先報「作者未回應」、作者之後才貼標記時，還能再報一次「作者已
+回應但未更新」；同一種情況不重報）。（2026-10-18 改：原文「每個 SHA 只通報一次」與
+實作不符。）
 
 在 PR 貼一則（第一行逐字照抄）：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEAD_SHA=$(cat "$STATE/head_sha")
+# 跟 3a (4) 同一個查詢：這個 SHA 的停滯通報，一則一行（--paginate 時 jq 逐頁跑，不能在 jq 裡數）
+STALL_Q=".[] | select(.user.login == \"wman-pm\" and (.body | split(\"\n\")[0] | sub(\"^\\\\s+\"; \"\") | startswith(\"## 驗收停滯：PR head 未更新\")) and (.body | contains(\"head SHA：$HEAD_SHA\"))) | .html_url"
+# 先數貼之前有幾則：第 2 則通報時，第 1 則已經在了，只看「有沒有印出網址」會把貼失敗誤判成成功
+if BEFORE=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$STALL_Q"); then
+BEFORE_N=$(printf '%s\n' "$BEFORE" | grep -c .)
 {
-printf '## 驗收停滯：PR head 未更新\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+printf '## 驗收停滯：PR head 未更新\n\nhead SHA：%s\n\n' "$HEAD_SHA"
 cat <<'EOF'
 上一輪驗收不通過（issue #<issue 編號> 的「驗收結果：不通過」留言），已送 Request changes 給作者。
 
@@ -1141,13 +1155,28 @@ cat <<'EOF'
 EOF
 printf '\n---\n— By Summer (acceptance-review)\n'
 } | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
-gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
-  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | startswith(\"## 驗收停滯：PR head 未更新\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
+# 重新數一次：剛好比貼之前多 1 則才算成功
+if AFTER=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$STALL_Q"); then
+  AFTER_N=$(printf '%s\n' "$AFTER" | grep -c .)
+  if [ "$AFTER_N" -eq $((BEFORE_N + 1)) ]; then
+    echo "8e 成功：$(printf '%s\n' "$AFTER" | grep . | tail -n 1)"
+  else
+    echo "8e 失敗：貼之前 ${BEFORE_N} 則、之後 ${AFTER_N} 則"
+  fi
+else
+  echo "8e 失敗：確認查詢失敗"
+fi
+else
+  echo "8e 失敗：貼之前的計數查詢失敗，沒有貼"
+fi
 ```
 
 兩種原因共用同一個中性的第一行（3a 的 `stall_total`／`stall_after_mark` 只認它；
-`human-notifier.sh` 也靠它通知人類），原因寫在內文。確認指令有印出網址才算成功。
-不要自己 @ 人類；失敗 → 記進摘要，下一輪 R3／R3' 會再試。
+`human-notifier.sh` 也靠它通知人類），原因寫在內文。**只有印出「8e 成功：<網址>」才算
+成功**：判斷方式是貼之前、之後各數一次這個 SHA 的停滯通報，之後必須剛好是之前加 1
+（2026-10-18 改：原本只看「確認查詢有沒有印出網址」，第 2 則通報時第 1 則已經在了，
+貼失敗也會印出網址、被誤判成成功）。不要自己 @ 人類；失敗 → 記進摘要，下一輪
+R3／R3' 會再試。
 
 ## 重做次數
 
