@@ -61,24 +61,35 @@ description: >-
 把本來可以自決的事推給人，就是讓整條自主閉環重新卡在人身上，這支 skill
 改寫的目的正是要消除這個卡點。
 
-### 貼 `needs-human` 的固定三步（順序不可換）
+### 貼 `needs-human` 的固定順序（順序不可換）
 
-1. **在 issue 上留言**，第一行固定寫 `## 需要人類決定（needs-human）`
-   （下一輪靠這行辨認「已經升級過」，見步驟 3 的冪等檢查），接著寫明「卡在
-   清單第幾類、需要人類決定什麼、有哪些選項」，以 `— By Summer` 簽名結尾。
-2. **貼 `needs-human` label**（`gh issue edit --add-label needs-human`）。
-3. **在 `bot-notify`（頻道 ID `1526283579309690990`）發一則 @ 人類
-   `<@824092654060830770>` 的訊息並附 issue 連結**。**整輪只發這一則 @**：
-   同一輪有多張就合併成一則（單則上限 2000 字，附上全部連結即可），不要
-   逐張各 @ 一次。Summer 若不是在 `bot-notify` 執行（人類在別的頻道／討論串
-   要求、或 usercron 的回覆頻道），那個地方照常貼**不帶 @ 的**純文字摘要，
-   @ 只留給 `bot-notify` 這一則——同一件事讓人類被通知兩次，只會讓人
-   學會忽略通知。
+1. **加 `needs-human` label**（`gh issue edit --add-label needs-human`）。
+   **這一步失敗就停在這裡**：不發 @、不留言、什麼都不留下。因為什麼都沒貼，
+   下一輪看到的還是原樣，自然會重試；若先貼了留言或 @ 再發現 label 加不上，
+   人類會被叫來看一張實際上沒有任何標記的單。
+2. **在 `bot-notify`（頻道 ID `1526283579309690990`）發一則 @ 人類
+   `<@824092654060830770>` 的訊息並附 issue 連結**，每張單用一句話寫明
+   「卡在第幾類、要決定什麼」，讓人類不點進去也知道輕重。**整輪只發這一則
+   @**：同一輪有多張就合併成一則，不要逐張各 @ 一次（合併後仍須 ≤ 2000
+   字，真的放不下就把超出的連結接在同一則的後續訊息，@ 只放第一則）。
+   Summer 若不是在 `bot-notify` 執行（人類在別的頻道／討論串要求、或 usercron
+   的回覆頻道），那個地方照常貼**不帶 @ 的**純文字摘要，@ 只留給
+   `bot-notify` 這一則——同一件事讓人類被通知兩次，只會讓人學會忽略通知。
+3. **在 issue 上留言**，第一行固定寫 `## 需要人類決定（needs-human）`，接著
+   寫明「卡在清單第幾類、需要人類決定什麼、有哪些選項」，以 `— By Summer`
+   簽名結尾。這則留言同時是日後辨認「這張單 Summer 升級過」的記號（見
+   步驟 3 的「人類處理完之後」）。
+4. **來源是 `ready-for-human` 的單，最後才移除 `ready-for-human`**（來源
+   是 3b 的單沒有這一步，它本來就沒有該 label）。
 
-先留言再貼 label，是因為 label 一貼上，各 poller 就開始跳過這張單；若
-label 先到、留言沒到，人類被通知後看不到要決定什麼。**留言已貼、但加
-`needs-human` 失敗時，第 3 步的 Discord 通知仍然要發**，並在裡面寫明
-label 沒加上——否則人類完全不知道有這張單在等他。
+label 放第一步，是因為 label 一貼上，各 poller 就立刻開始跳過這張單、停止
+燒額度；通知放在留言之前，是因為「人類盡快知道」比「說明寫完整」更要緊。
+**接受的風險**：若在 @ 之後、留言之前被中斷，人類已經被通知、`needs-human`
+也已在身上（poller 都會跳過），只是 issue 上少了那則說明——人類點進去
+看不到細節，但 @ 訊息裡已有一句話的概要，不會卡死，也不需要補做。
+
+**絕不重新加回 `needs-human`**：issue 上已有 Summer 的升級留言、但沒有
+`needs-human` label，代表人類處理完並移除了它，不是「做到一半」。
 
 **帶著 `needs-human` 的 issue，本 skill 一律不動**：不收養、不留言、不改
 label。它在等人類，任何自動化介入都可能蓋過人類的決定，或在等人時繼續
@@ -110,13 +121,14 @@ GA4 缺席時必須有替代來源，不能以「沒數據」為由收工——�
 ### 2. 蒐集兩個 repo 現況
 
 ```bash
-gh issue list --repo wm4n/chainbreak --state open --json number,title,body,labels,author,createdAt
-gh issue list --repo wm4n/hangman    --state open --json number,title,body,labels,author,createdAt
+gh issue list --repo wm4n/chainbreak --state open --json number,title,body,labels,author,createdAt,comments
+gh issue list --repo wm4n/hangman    --state open --json number,title,body,labels,author,createdAt,comments
 gh pr list --repo wm4n/chainbreak --state merged --limit 20 --json number,title,mergedAt
 gh pr list --repo wm4n/hangman    --state merged --limit 20 --json number,title,mergedAt
 ```
 
-開放 issue 用來**避免重複開單**：新想法先跟這份清單比對主題，明顯重疊的
+`comments` 要一次撈齊：下面候選的留言檢查與「人類處理完之後」判斷都要看留言，
+全部用這份資料，不再逐張另外查。開放 issue 用來**避免重複開單**：新想法先跟這份清單比對主題，明顯重疊的
 不重開，改成在既有 issue 底下留言補充佐證（既有 issue 若帶 `needs-human`
 則不留言，見上）。近期 merged PR 用來確認「這個功能是不是已經做過了」——
 訊號如果來自一個已經上線的修正，代表資料還沒反映最新版本，不是新需求。
@@ -134,16 +146,18 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 把存在的 label 誤判成缺漏。要確認的是 `grill-me`、`spec-only`、`pm-owned`
 （收養用）與 `needs-human`（升級用）。
 
-某個 repo 缺這四個其中任一個 → **這一輪在那個 repo 不貼
-任何收養或升級的留言**，那個 repo 的收養與升級候選全部跳過。理由：留言先於
-label，若先貼了留言才發現 label 加不上去，issue 上會留下一則「已收養」
-「需要人類決定」的留言，實際上卻沒有任何 label、沒有任何下游動作，是一則
-說謊的紀錄。缺的 label 不要自己建（改 repo 設定屬於 `needs-human` 第 2 類），
+某個 repo 缺這四個其中任一個 → **這一輪在那個 repo 不收養、不升級、不新開
+issue**，該 repo 的相關候選全部跳過。理由：收養是先留言後加 label，若先貼了
+留言才發現 label 加不上去，issue 上會留下一則「已收養」的留言，實際上卻沒有
+任何 label、沒有任何下游動作，是一則說謊的紀錄；新開 issue 少了
+`grill-me`／`spec-only` 就是一張沒進流程的單。缺的 label 不要自己建（改 repo 設定屬於 `needs-human` 第 2 類），
 改成：摘要寫明哪個 repo 缺哪個 label，並在 `bot-notify` 發**一則** @ 人類的
 訊息請他建立（這則就是整輪唯一的 @，與同輪的 `needs-human` 升級合併）。
 `gh label list` 本身報錯（網路、權限）→ 同樣當作該 repo 本輪不能收養或升級，
 跳過並在摘要寫明是「label 查詢失敗」，不要憑印象當作 label 存在。
-新開 issue 只用 `grill-me`／`spec-only`，不受此影響。
+**新開 issue 也在這個預檢之內**：`gh issue create --label grill-me --label
+spec-only` 遇到 label 不存在，可能直接失敗或建出沒帶 label 的單，所以該 repo
+缺 label（或查詢失敗）時本輪就不在那個 repo 新開，摘要裡說明。
 
 ### 3. 找需求來源——四選項，全部都讀、不必等 GA4
 
@@ -162,21 +176,26 @@ hangman 同理把 repo 名換掉。找 roadmap、TODO、「之後要做」「待
 但 backlog 裡沒有、也沒有做過**的項目。檔案不存在（404）是正常情況，
 跳過即可，不當成錯誤。
 
-#### 候選的冪等檢查（3b、3c 共用）
+#### 候選的留言檢查（3b、3c 共用）
 
-前一輪可能做到一半就中斷。挑候選時，對每張單先查它的 comments：
+用步驟 2 取回的 `comments`（作者 `wman-pm` 的留言），對每張候選先看 Summer 留
+過什麼：
 
-- **已有 `## Summer 收養此單` 留言**（作者 `wman-pm`）→ 不是全新候選，一律
-  轉去 5b 的「續做」路徑處理（符合續做條件才補，不符合就不動），不重貼
-  留言、不消耗預算。
-- **已有 `## 需要人類決定（needs-human）` 留言（作者 `wman-pm`）但沒有
-  `needs-human` label** → 升級做到一半。**只補加 `needs-human` label**
-  （來源是 `ready-for-human` 的單，加成功後再移除 `ready-for-human`），
-  **不再貼留言、不再發 @**。這個補做同樣要求該 repo 通過 label 預檢，且單上
-  沒有其他流程 label（`grill-me*`、`agent-*`、`ready-for-agent`、`pm-owned`）。
+- **已有 `## Summer 收養此單` 留言** → 不是全新候選，一律轉去 5b 的「續做」
+  路徑處理（符合續做條件才補，不符合就不動）。續做**不經過、也不受**步驟 4 的
+  預算與排序。
+- **已有 `## 需要人類決定（needs-human）` 留言、目前沒有 `needs-human`
+  label** → 這代表**人類已處理並移除了 label**。**絕不重新加回**。處理方式見
+  下面「人類處理完之後」。
+- 兩種留言都沒有 → 全新候選，照下面 3b／3c 的篩選走。
 
-下面 3b 的篩選對這兩種單同樣適用，只是它們命中上面的規則時走補做、不走全新
-流程。
+**人類處理完之後（3b、3c 都適用）**：在 Summer 的升級留言**之後**，若出現
+`wm4n` 的留言，且單上沒有任何流程 label（`ready-for-human` 例外，見下），
+這張單重新成為候選——Summer **照人類在留言裡寫明的決定做**。例如人類決定
+「可以做」，就走正常的收養路徑（過五類檢查、算預算、5b 三個動作）；人類決定
+「不做」，就不收養。Summer 的升級留言之後沒有 `wm4n` 的留言，一律跳過、
+不動——人類只是拿掉 label 但沒說決定，不能替他腦補。（升級時若移除
+`ready-for-human` 那步當時失敗，單上可能還留著它，視同沒有流程 label。）
 
 #### 3b. 人類開的 backlog
 
@@ -206,17 +225,16 @@ gh issue list --repo wm4n/hangman    --label ready-for-human --state open \
 `wman-pm`）。通過的才逐張讀完 body 與 comments，判斷**卡住的那個決定**落不落在
 `needs-human` 五類：
 
-- **落在五類** → 走「貼 `needs-human` 的固定三步」（留言、加 label、
-  Discord @ 人類）；第 2 步確認 `needs-human` 已加上之後，才移除
-  `ready-for-human`（先加後移除——反過來中途失敗，這張單兩個 label 都
-  沒有，從此沒有任何自動化找得到它）。這**不計入**預算。
+- **落在五類** → 走「貼 `needs-human` 的固定順序」（加 label、@ 人類、
+  留言、最後移除 `ready-for-human`；先加後移除——反過來中途失敗，這張單
+  兩個 label 都沒有，從此沒有任何自動化找得到它）。這**不計入**預算。
 - **不落在五類** → Summer 以 PM 身分把決定做掉，在收養留言裡寫明
   「原本卡在什麼決定、Summer 的決定、理由」（帶 `— By Summer`），然後
   走「收養」流程。收養**計入**預算（見步驟 4）。
 
 3b 的 backlog 單也一樣先過五類：落在五類的**不收養**（收養等於把它送進
-Rick/Morty 的開發流程），改走「貼 `needs-human` 的固定三步」；不落在五類
-才考慮收養。
+Rick/Morty 的開發流程），改走「貼 `needs-human` 的固定順序」（沒有
+`ready-for-human` 要移除，那一步略過）；不落在五類才考慮收養。
 
 #### 3d. GA4（僅限有設定的 property）
 
@@ -265,8 +283,10 @@ done
 ```
 
 四個數字相加得「已用」，**本輪剩餘預算 ＝ 3 − 已用**，≤ 0 就這輪不新開
-也不收養（`needs-human` 升級不受影響）。**續做一個做到一半的收養不消耗
-預算**（它的收養留言在貼出當時已經算進「已用」，見 5b 的續做規則）。
+也不收養（`needs-human` 升級不受影響）。**續做一個做到一半的收養（5b）
+不受預算限制**：它的收養留言在貼出當時已經算進「已用」，所以剩餘預算是 0
+也照樣補完。**下面的優先順序與同層排序，只對「全新的收養與新開」生效，續做
+候選不參與、不會被它們擠掉**——續做一定會跑。
 
 預算不夠把候選全做完時，依序保留：①`ready-for-human` 收養 ②backlog 收養
 ③新開的單——前兩者背後已經有人類明確的需求，新開的單只是 Summer 自己的
@@ -278,6 +298,8 @@ done
 Discord 摘要照實說「本輪無符合條件的需求」與原因。
 
 ### 5a. 新開 issue
+
+該 repo 通過 label 預檢（含 `grill-me`、`spec-only`）才新開；沒通過就跳過，摘要說明。
 
 ```bash
 gh issue create --repo wm4n/chainbreak \
@@ -381,9 +403,10 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
 只貼：新開的標題、收養的 issue、`needs-human` 升級的 issue、各一句話理由與
 連結，不要把完整 body 貼進 Discord——單則訊息有 2000 字限制，超過會被截斷，
 而截斷後的訊息內容不完整還可能被其他 poller 誤判成新事件、重複觸發。
-@ 人類只有 `bot-notify` 那一則（規則見前面「貼 `needs-human` 的固定三步」），
+@ 人類只有 `bot-notify` 那一則（規則見前面「貼 `needs-human` 的固定順序」），
 其他地方的摘要不帶 @。Summer 若就是在 `bot-notify` 執行，摘要與那一則 @
-可以合併成同一則訊息。這一輪若因預算用完、label 缺漏、動作失敗而有沒做的
+可以合併成同一則訊息，**但合併後必須 ≤ 2000 字**，超過就把 @ 單獨成一則
+先發，摘要另發一則。這一輪若因預算用完、label 缺漏、動作失敗而有沒做的
 項目，摘要一併寫明原因。
 
 ## 鐵則
@@ -404,11 +427,14 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
 - **label 一律先加後移除**：收養 `ready-for-human` 的單最後才移除
   `ready-for-human`；`ready-for-human` 改貼 `needs-human` 也是先加
   `needs-human` 再移除 `ready-for-human`。
-- **貼 `needs-human` 的順序固定：留言 → 貼 label → Discord @ 人類**；
-  留言要說清楚第幾類與需要決定什麼。
+- **貼 `needs-human` 的順序固定：加 label → 單一 @ → 留言（標題
+  `## 需要人類決定（needs-human）`）→（`ready-for-human` 來源才有）最後移除
+  `ready-for-human`**；加 label 失敗就整個停手。已有升級留言卻沒有 label，
+  是人類處理完移除的，**絕不重新加回**。
 - **帶 `needs-human` 的 issue 一律不動**。
-- **收養或升級之前先做 label 預檢**，缺 `pm-owned`／`needs-human` 就不貼任何
-  留言。
+- **收養、升級、新開之前先做 label 預檢**，缺 `grill-me`／`spec-only`／
+  `pm-owned`／`needs-human` 任一個，那個 repo 本輪就不做這些動作。
+- **續做做到一半的收養不受預算與排序限制**，一定會跑。
 - **整輪只 @ 人類一次，且只在 `bot-notify`**。
 - **清單以外的決定 Summer 自己做**，並把理由留在 issue 留言（帶
   `— By Summer`）——決定沒有留下理由，事後沒有人看得出為什麼這樣收養。
@@ -441,5 +467,7 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
   `bot-notify` 請人類建立。
 - **repo 文件的需求是 Summer 自己的推論**，不像人類開的單有明確意圖；
   因此排在 3 張上限的最後順位，且驗收條件仍必須可驗證。
+- **升級在「@ 之後、留言之前」被中斷**：人類已被通知、`needs-human` 已在
+  身上，poller 都會跳過，只是 issue 上缺說明留言；這是接受的取捨，不補做。
 - **寫不出驗收條件的人類單不會被收養**，也不會自動升級給人類，下一輪會
   再被看到一次——這是刻意的：缺資訊不屬於 `needs-human` 五類。
