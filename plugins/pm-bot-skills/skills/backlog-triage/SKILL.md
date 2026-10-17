@@ -578,7 +578,8 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
 
 **5. 這次失敗的規格修過了嗎？** `LAST_FAILED_AT` 之後已有 `wman-pm` 第一行為
 `## Summer 已修正規格` 的留言 → 已經修過（多半是上一輪 WIP 滿了沒放行），
-**不重修**，直接跳到步驟 7。
+**不重修**，直接跳到步驟 7。**沒有這則 anchor 留言 → 照步驟 6 修**（包括上一輪
+改 body 或確認失敗、所以沒貼留言的單）。
 
 **6. 先過五類，再修規格**：
 
@@ -592,17 +593,31 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
 
 `## Summer 已修正規格` 留言是步驟 5 判斷「修過了沒」的依據，所以一定要等 body
 確認改好之後才貼。先貼留言、body 卻沒改成功的話，下一輪看到留言就不會再修，
-直接把一份壞掉的規格放行給 Rick/Morty。**6a 的 `gh issue edit` 失敗，或 6b
-確認不通過 → 不貼 6c 的留言、不放行**，記進摘要，下一輪會重新從步驟 5 開始
-（沒有留言，所以會重修）。
+直接把一份壞掉的規格放行給 Rick/Morty。**下列任一種情況 → 不修（停在原地）、
+不貼 6c 的留言、不放行**，記進摘要，下一輪會重新從步驟 5 開始（沒有留言，所以
+會重修）：
+
+- 6a 讀取 body 失敗（輸出「讀取 body 失敗」）；
+- 6a 的 `gh issue edit` 失敗（輸出「改 body 失敗」）；
+- 6a 沒有印出「6a 成功」（例如指令中途出錯、什麼都沒印）；
+- 6b 確認不通過，或 6b 的查詢本身失敗。
+
+**6a 與 6b 放在同一次 Bash 呼叫裡跑**：6b 要用 6a 設定的變數（`SIXA`、
+`HEADING`、`BASE_BODY`、`CHECK`）。
 
 **6a. 改 body**，依 issue 作者分兩種：
 
-- **作者是 `wman-pm`**（Summer 自己開的單）→ 直接改：
+- **作者是 `wman-pm`**（Summer 自己開的單）→ 直接改。`CHECK` 設成這次新寫進
+  body、原本沒有的一句話（挑一句獨特的，6b 靠它確認改動真的寫進去了）：
 
-  ```bash
-  gh issue edit "$NUM" --repo "$REPO" --body "$UPDATED_BODY"
-  ```
+```bash
+SIXA=; CHECK='<這次新寫進 body、原本沒有的一句話>'
+if gh issue edit "$NUM" --repo "$REPO" --body "$UPDATED_BODY"; then
+  SIXA=ok; echo "6a 成功"
+else
+  echo "改 body 失敗"
+fi
+```
 
 - **作者不是 `wman-pm`**（人類開、Summer 收養的單）→ **人類寫的原文一個字
   都不改**，在 body **最後面附加**一段 `## Summer 規格修正（YYYY-MM-DD）`，
@@ -611,10 +626,19 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
   失敗就停手——拿空字串去 `--body` 會把人類的原文整段清掉：
 
 ```bash
+SIXA=
+TODAY=$(TZ=Asia/Taipei date +%Y-%m-%d)
+HEADING="## Summer 規格修正（${TODAY}）"
 if CUR_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
-APPEND=$(cat <<'EOF'
-## Summer 規格修正（YYYY-MM-DD）
-
+  # 今天已經附加過一段（同一天重跑，上次沒走到 6c）：從那段標題起整段換掉，不附加第二段。
+  # 修正段一律附加在最後面，所以從今天的標題到結尾都是 Summer 寫的，人類原文不受影響
+  case "$CUR_BODY" in
+    *"$HEADING"*) BASE_BODY="${CUR_BODY%%"$HEADING"*}" ;;
+    *) BASE_BODY="$CUR_BODY" ;;
+  esac
+  # 去掉結尾空白，接上去才不會越附加空行越多
+  BASE_BODY="${BASE_BODY%"${BASE_BODY##*[![:space:]]}"}"
+SECTION=$(cat <<'EOF'
 依 Rick/Morty 指出的規格問題補充。上方人類原文保留不動；兩者衝突時，以本段為準。
 
 ### 修正後的需求
@@ -627,30 +651,61 @@ APPEND=$(cat <<'EOF'
 - <條件二>
 EOF
 )
-  gh issue edit "$NUM" --repo "$REPO" --body "$(printf '%s\n\n%s\n' "$CUR_BODY" "$APPEND")" || echo "改 body 失敗"
+  if gh issue edit "$NUM" --repo "$REPO" --body "$(printf '%s\n\n%s\n\n%s\n' "$BASE_BODY" "$HEADING" "$SECTION")"; then
+    SIXA=ok; echo "6a 成功"
+  else
+    echo "改 body 失敗"
+  fi
 else
-  echo "讀取 body 失敗，本輪不修這張"
+  # 讀不到 body：不修、不貼 6c、不放行，記進摘要
+  echo "讀取 body 失敗"
 fi
 ```
 
-  - `YYYY-MM-DD` 換成今天的日期。之前已經附加過修正段（上一次失敗修的）就不動
-    它，在最後面再附加一段新日期的；最新一段為準。
+  - 標題日期由 `TODAY` 自動產生（台北時間），不要手打。之前**別天**附加過的修正
+    段不動，在最後面再附加今天的一段，最新一段為準；**今天**已經附加過的就整段
+    換掉，不會出現兩段同日期的修正段。
   - 附加段**不寫 `— By Summer` 簽名**：body 裡出現這串字，`summer-grill-responder`
     會把這張人類的單誤認成 Summer 開的單（與 `product-planning` 收養時「不在人類
     的 body 補簽名」同一個理由）。標題已經寫明是 Summer 的修正，紀錄與簽名放在
     6c 的留言裡。
 
-**6b. 確認 body 真的改好了**：
+**6b. 確認 body 真的改好了**（接在 6a 後面、同一次 Bash 呼叫）：
+
+作者不是 `wman-pm`（附加修正段）：
 
 ```bash
-gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'
+# 今天的修正段標題在 body 裡，而且人類原文（BASE_BODY）仍完整排在最前面
+# SIXA：6a 成功才檢查。6a 失敗時 body 裡可能還留著同一天上次附加的舊段，會讓檢查誤判通過
+if [ "$SIXA" = ok ] \
+  && HAS=$(gh issue view "$NUM" --repo "$REPO" --json body --jq ".body | contains(\"$HEADING\")") \
+  && [ "$HAS" = "true" ] \
+  && NEW_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
+  case "$NEW_BODY" in
+    "$BASE_BODY"*) echo "6b 通過" ;;
+    *) echo "6b 不通過：人類原文不完整" ;;
+  esac
+else
+  echo "6b 不通過"
+fi
 ```
 
-- 作者是 `wman-pm`：看得到 6a 改的那個段落是新內容。
-- 作者不是 `wman-pm`：人類原文仍完整在前面，最後面是這次新附加、標題日期是
-  今天的 `## Summer 規格修正（YYYY-MM-DD）`。
+作者是 `wman-pm`（直接改）：
 
-不符合（或這個查詢本身失敗）→ 停在這裡：不貼 6c、不放行，記進摘要。
+```bash
+# CHECK 可能含引號，不塞進 jq 字串，改用 bash 比對；SIXA 同上，6a 成功才檢查
+if [ "$SIXA" = ok ] && NEW_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
+  case "$NEW_BODY" in
+    *"$CHECK"*) echo "6b 通過" ;;
+    *) echo "6b 不通過" ;;
+  esac
+else
+  echo "6b 不通過"
+fi
+```
+
+只有印出「6b 通過」才算通過；其他輸出（含什麼都沒印）→ 停在這裡：不貼 6c、
+不放行，記進摘要。
 
 **6c. 最後才貼記錄變更的留言**（第一行逐字照抄，步驟 5 靠它判斷修過了沒）：
 
@@ -720,7 +775,7 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
    - 「人類已處理升級但沒有回覆」；
    - 「重做次數或留言查詢失敗」；
    - 「已被認領／放行中，label 過渡中，待確認」（同時帶 `agent-active` 或
-     `ready-for-agent`，段 2 步驟 1 沒有處理的）；
+     `ready-for-agent`，段 2 步驟 1 補做或不動之後 label 仍未收斂的）；
    - 「規格修正未完成（改 body、確認或紀錄留言失敗），下一輪重修」。
 2. **帶 `needs-human` 的 open 單**——提醒還有哪些在等人類決定。**只放在摘要，
    不再 @**：這些單升級當時已經 @ 過，每輪重 @ 只會讓人學會忽略通知。
