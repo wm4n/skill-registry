@@ -190,7 +190,7 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 | --- | --- | --- |
 | `## 需要人類決定（needs-human）` | Summer 升級時 | 認出「這張單升級過」 |
 | `## Summer 已修正規格` | 本 skill 段 2 | 認出「這次失敗的規格已經修過」，不重修 |
-| `## 驗收結果：不通過` | `acceptance-review` | 算重做次數 |
+| `## 驗收結果：不通過` | `acceptance-review` | 算重做次數（`## 驗收結果：不通過（作者非 bot，待人類處理）` 也以這串開頭，一樣算） |
 | `## Summer 收養此單`、`依人類決定不收養` | `product-planning` | 段 4 依該 skill 的規則判斷 |
 
 人類是 `wm4n`；bot 帳號是 `wman-dev`（Rick）、`wman-review`（Morty）、

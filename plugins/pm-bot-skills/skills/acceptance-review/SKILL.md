@@ -52,7 +52,8 @@ description: >-
 > - `human-notifier.sh`：`needs-human` 被加上、或 PR／issue 上出現 `wman-pm` 貼的
 >   `## 驗收結果：通過（待人類 merge）`、`## 驗收結果：無法驗證（測試環境）`、
 >   `## 驗收結果：無法驗證（基線紅）`、`## 驗收停滯：PR head 未更新`、
->   `## 驗收紀錄補記失敗`，就 @ 人類一次。
+>   `## 驗收紀錄補記失敗`、`## 驗收結果：不通過（作者非 bot，待人類處理）`，就 @ 人類
+>   一次（一般的 `## 驗收結果：不通過` 不通知）。
 >
 > 所以那幾個標題的第一行一個字都不能改，改了人類就收不到通知。本 skill 在
 > Discord 只回本輪摘要（不帶任何 @）。
@@ -125,7 +126,8 @@ STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 | 第一行 | 貼在哪 | 拿來做什麼 |
 | --- | --- | --- |
 | `## 驗收結果：通過（待人類 merge）` | PR | 冪等（記下驗過的 SHA）；**human-notifier 據此 @ 人類 merge** |
-| `## 驗收結果：不通過` | issue | 冪等；**`backlog-triage` 靠它算重做次數** |
+| `## 驗收結果：不通過` | issue | 冪等；**`backlog-triage` 靠它算重做次數**；送回給 bot 作者的紀錄，不通知人類 |
+| `## 驗收結果：不通過（作者非 bot，待人類處理）` | issue | PR 作者不是 bot 帳號時用這一行取代上一行（2026-10-17 fix round 1）：不送回、要人類處理；**human-notifier 通知**。它以 `## 驗收結果：不通過` 開頭，重做次數與冪等照樣算到 |
 | `## 驗收結果：無法驗證（測試環境）` | PR | 冪等；Summer 環境跑不起來，不算重做；human-notifier 通知 |
 | `## 驗收結果：無法驗證（基線紅）` | PR | 冪等；base branch 自己就紅（R18），不算重做；human-notifier 通知 |
 | `## 需要人類決定（needs-human）` | issue | 升級紀錄（R15，見下）；第二行區分兩種升級。通知靠 label 事件，不靠這則 |
@@ -133,7 +135,9 @@ STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 | `## 驗收紀錄補記失敗` | PR | 8d 補記不通過紀錄失敗時通報人類；每個 SHA 只報一次；human-notifier 通知 |
 
 `## 驗收結果：不通過` 這串字一個字元都不能改：`backlog-triage` 算重做次數時
-就是用它比對，改了就會少算，自動送回的迴圈就失去上限。標了「human-notifier
+就是用它比對（第一行以它開頭），改了就會少算，自動送回的迴圈就失去上限。
+`## 驗收結果：不通過（作者非 bot，待人類處理）` 刻意以同一串開頭，所以作者非 bot 的那則也算一次重做、也是這個 SHA 的冪等
+紀錄；只有它會被 human-notifier 通知，一般的不通過不會。標了「human-notifier
 通知」的幾行也一樣：主機端 `human-notifier.sh` 只認作者 `wman-pm`、第一行以這幾串
 開頭的留言，改了人類就收不到通知。舊版本貼過只有
 `## 驗收結果` 的 PR 留言（沒有冒號後綴、沒有 SHA），**不符合上表任何一行，
@@ -465,9 +469,13 @@ fi
 數。ISO 8601 的 UTC 時間字串可以直接用字串比大小。
 
 **3b. 依序判斷，第一個符合的就照做**（`mark` 的距今秒數 < 18000 叫「新的
-`start`」，≥ 18000 叫「逾時的 `start`」；5 小時是主機端 `pr-review-poller.sh` 的
-租約 `PR_REVIEW_LEASE_MIN=300`——start 還在租約內，poller 也認定作者還在處理、
-不會重送，那邊改了這裡跟著改（2026-10-17 由 2 小時改成 5 小時，R17）。「參考時間」
+`start`」（R1 用），≥ 57600 叫「逾時的 `start`」（R3 用）；介於兩者之間（5–16
+小時）的 `start` 兩條都不符合，落到 R4，摘要計入「等作者回應（pr-review-poller
+觸發中）」。5 小時是主機端 `pr-review-poller.sh` 的租約 `PR_REVIEW_LEASE_MIN=300`：
+start 還在租約內，poller 也認定作者還在處理、不會重送。過了 5 小時 poller 會重送、
+叫滿 3 次（約 15 小時）就自己 @ 人類，所以 R3 對「卡住的 start」要等到 16 小時
+才通報，跟 R3' 同一個門檻，不搶在 poller 重送之前通報停滯。那邊改了這裡跟著改
+（2026-10-17 R17 由 2 小時改成 5 小時；fix round 1 I3 把「逾時」拆出來改成 16 小時）。「參考時間」
 ＝`rev_at`，空白時用 `fail_at`。「可以通報停滯」＝`stall_after_mark` 是 0
 **而且** `stall_total` < 2）：
 
@@ -721,6 +729,13 @@ tail -n 15 "$STATE/base-$NAME.log"
 4. **測試失敗（作者的問題）**：base 上同一個指令 exit 0、head 上卻失敗。**只有
    這一種算不通過的「測試失敗」。**
 
+**前置指令壞了，後面的都不比**（fix round 1 I2）：同一邊（head 或 base）只要有一個
+前置指令（`flutter pub get`、`mise trust`／`mise install` 這類準備環境、裝依賴的指令）
+被歸為環境問題，**那一邊在它之後的所有指令一律算環境問題**，不拿來跟另一邊比——依賴
+沒裝好，後面的 `analyze`／`test` 失敗只是連鎖反應，拿去比會被誤判成「測試失敗」或
+「基線紅」。head 的前置壞了 → head 之後的失敗都是第 1 類；base 的前置壞了 → head
+上失敗的指令都落在第 2 類。
+
 分不清是哪一種時，**當作環境跑不起來**：送回給作者修不了 Summer 的環境，只會讓
 Rick/Morty 白跑一輪、用掉重做額度。
 
@@ -876,7 +891,7 @@ printf '\n— By Summer (acceptance-review)\n'
 
 | 情況 | 做什麼 |
 | --- | --- |
-| PR 作者不是 `wman-dev`／`wman-review` | **不送回**：只貼不通過留言（第 3 步），在本輪摘要寫明請人類處理（不 @；這則不在 human-notifier 的通知標題內，見「已知限制」） |
+| PR 作者不是 `wman-dev`／`wman-review` | **不送回**：只貼不通過留言（第 3 步），**第一行用 `## 驗收結果：不通過（作者非 bot，待人類處理）`**。`human-notifier.sh` 依這個標題通知人類處理；本 skill 不 @ |
 | `rework_after` ≥ 2 | **不送回**：走「貼 `needs-human` 的固定順序」（第 5 類，留言要寫 SHA）。label 加不上就整張停手，連不通過留言都不貼；加上了，等 needs-human 留言貼好，再貼不通過留言（第 3 步）。@ 由 human-notifier 依 label 事件發 |
 | `rework_after` < 2 | **送回**：下面 i → ii |
 
@@ -922,12 +937,15 @@ gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
 ii. **在 issue 貼不通過留言**（第 3 步）。
 
 **第 3 步：在 issue 貼不通過留言**（三條路都要貼——它記下這個 SHA 驗過了，也是
-重做次數的計數來源）。第一行逐字照抄：
+重做次數的計數來源）。第一行逐字照抄，依路線二選一：PR 作者不是 bot 帳號 →
+`## 驗收結果：不通過（作者非 bot，待人類處理）`（human-notifier 會通知人類）；其他兩條路（送回、第 5 類）→
+`## 驗收結果：不通過`（不通知：送回由 pr-review-poller 觸發作者、第 5 類由 label 事件通知）：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEADING='## 驗收結果：不通過'   # PR 作者不是 bot 帳號時改成 '## 驗收結果：不通過（作者非 bot，待人類處理）'
 {
-printf '## 驗收結果：不通過\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+printf '%s\n\nhead SHA：%s\n\n' "$HEADING" "$(cat "$STATE/head_sha")"
 cat <<'EOF'
 PR：#<PR 編號>
 驗收基準：<「✅ 需求共識」／基準較弱（沒有 grill 共識）：<來源>>
@@ -1100,7 +1118,8 @@ printf '\n---\n— By Summer (acceptance-review)\n'
 上一輪送了 Request changes，PR head 卻沒有新的 commit。兩種原因：
 
 - **R3：作者已回應但未更新**——作者提問、反駁、認為超出範圍、
-  `pr-review-response` 失敗，或 `start` 超過 5 小時沒有下文。
+  `pr-review-response` 失敗，或 `start` 超過 16 小時沒有下文（poller 的重送與升級
+  已經用完）。
 - **R3'：作者未回應**——review 送出超過 16 小時，作者連 `start` 都沒貼
   （`pr-review-poller` 應已重送 3 次並 @ 過人類；這則是 poller 沒在跑時的備援）。
 
@@ -1116,7 +1135,7 @@ printf '## 驗收停滯：PR head 未更新\n\nhead SHA：%s\n\n' "$(cat "$STATE
 cat <<'EOF'
 上一輪驗收不通過（issue #<issue 編號> 的「驗收結果：不通過」留言），已送 Request changes 給作者。
 
-停滯原因：<R3：作者已回應但未更新——pr-review-response 最新標記是 done／failed，或 start 已超過 5 小時，時間 <標記時間>／R3'：作者未回應——Request changes 於 <時間> 送出，超過 16 小時沒有任何 pr-review-response 標記（pr-review-poller 應已重送並通報；若沒收到它的通報，請確認 Mac mini 上 pr-review-poller 的 cron 有在跑）>。PR head 仍是上面這個 SHA，沒有新的 commit。
+停滯原因：<R3：作者已回應但未更新——pr-review-response 最新標記是 done／failed，或 start 已超過 16 小時，時間 <標記時間>／R3'：作者未回應——Request changes 於 <時間> 送出，超過 16 小時沒有任何 pr-review-response 標記（pr-review-poller 應已重送並通報；若沒收到它的通報，請確認 Mac mini 上 pr-review-poller 的 cron 有在跑）>。PR head 仍是上面這個 SHA，沒有新的 commit。
 
 本 skill 不會對同一個 SHA 再送回。需要人類看作者在 review thread 的回覆（或確認作者 bot 是否正常），決定要回覆作者、重新觸發、自己修改，還是關閉 PR。作者推了新 commit 之後，下一輪會自動重新驗收。
 EOF
@@ -1172,8 +1191,8 @@ changes review 讓 `pr-review-poller.sh` 發。
 （回在觸發這一輪的地方，不帶任何 @）：本輪寫了什麼（通過、不通過、送回、續做送回、
 升級、無法驗證（測試環境／基線紅）、通報停滯）、異常（GraphQL 報錯、找不到 PR、
 多個候選 PR、步驟 3a 或重做次數查詢失敗、SHA 中途變動）、寫入失敗、**需要人類處理
-但不在 human-notifier 通知範圍內的事**（作者不是 bot 帳號的不通過、缺 `needs-human`
-label、gh 帳號不對——見「已知限制」），以及 **needs-human 已貼但沒有升級說明的
+但不在 human-notifier 通知範圍內的事**（缺 `needs-human` label、gh 帳號不對——見
+「已知限制」），以及 **needs-human 已貼但沒有升級說明的
 issue（逐張點名）**。只有跳過的時候，回一行就好：「acceptance-review：本輪無新結果
 （agent-done <N> 張：已驗過 <a>、無法驗證（等環境修好）<b>、無法驗證（等 base 修好）
 <g>、停滯（已通報）<c>、作者處理 review 中 <d>、等作者回應（pr-review-poller 觸發中）
@@ -1236,9 +1255,10 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
   摘要（不帶 @）。上線 runbook 要先確認兩支 cron 都在跑。
 - **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @，人類不會被
-  叫）：作者不是 bot 帳號的 `## 驗收結果：不通過`、缺 `needs-human` label、gh 帳號
-  不是 `wman-pm`。前兩者是舊 PR／上線前置的問題，後者發生時 Summer 什麼都寫不進
-  GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先確認 label 與帳號。
+  叫）：缺 `needs-human` label、gh 帳號不是 `wman-pm`。前者是上線前置的問題，後者
+  發生時 Summer 什麼都寫不進 GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先
+  確認 label 與帳號。（作者不是 bot 帳號的不通過，fix round 1 起改用獨立標題、由
+  human-notifier 通知。）
 - **R3' 與 poller 升級可能各通知一次**：bot 一直沒醒時，`pr-review-poller` 約 15
   小時後 @ 人類，本 skill 16 小時後再貼一則停滯通報（human-notifier 再通知一次）。
   後者是 poller 沒在跑時的備援，重複一次可接受。
@@ -1251,19 +1271,26 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   重做次數少算一次。下一輪最晚是一小時後；21:30 那一輪之後要等到隔天 09:30，
   這段期間窗口最長。要連續兩次寫入失敗才會發生，接受。
 - **停滯靠 `pr-review-response` 的標記與時間判斷**：
-  - 作者有貼標記：`done`／`failed`，或 `start` 超過 5 小時 → R3 通報「作者已回應
-    但未更新」。
+  - 作者有貼標記：`done`／`failed`，或 `start` 超過 16 小時 → R3 通報「作者已回應
+    但未更新」。`start` 在 5–16 小時之間時不通報：`pr-review-poller` 正在重送，摘要
+    計入「等作者回應」。
   - 作者完全沒有標記：review 送出超過 16 小時 → R3' 通報「作者未回應」。作者若
     其實回應了、只是沒走 `pr-review-response`（例如在 PR 上手動回覆、沒有標記），
     本 skill 分不出來，一樣報成「作者未回應」，人類點進 PR 就看得到實情。
   - 每個 SHA 最多通報 2 則：R3' 先報過、作者之後才貼標記時，R3 還能再報一次；
     同一種情況不重報。
-  - 5 小時對齊 `pr-review-poller` 的租約；`pr-review-response` 自己的並行防護
-    仍寫 2 小時（那支 skill 不在本次改動範圍），只影響人類手動重觸發時能不能並行，
-    不影響這裡的判斷。
+  - 「新的 start」的 5 小時對齊 `pr-review-poller` 的租約，「逾時的 start」的 16
+    小時大於 poller 的 3 次重送；`pr-review-response` 自己的並行防護仍寫 2 小時（那支
+    skill 不在本次改動範圍），只影響人類手動重觸發時能不能並行，不影響這裡的判斷。
 - **R2 續做與作者的 `start` 標記**：R2 排在 R1 前面。作者在 Summer 貼不通過留言
   之前就開始處理時，R2 先成立，8d 只補記、不碰作者；之後作者推了新 commit 就走
   正常驗收，沒推就在 `done`／`failed` 之後由 R3 通報停滯。
+- **PR 自己改了 `pubspec.yaml` 等設定，導致 `flutter pub get` 失敗**：目前一律歸為
+  環境問題（6c 的前置指令規則），走「無法驗證（測試環境）」通知人類，**不會送回**給
+  作者——Summer 分不清是 PR 改壞了依賴，還是自己的網路／快取壞了。人類看到再決定。
+- **基線紅會蓋掉 PR 自己帶進的新失敗**（R18）：base 本來就紅、PR 又讓同一個指令
+  多壞了別的地方，兩邊都 exit ≠ 0，一樣歸成基線紅——PR 造成的回歸被蓋掉、不會送回。
+  但它**不會通過**，human-notifier 會通知人類；base 修好後重驗就看得出來。
 - **基線紅之後 base 修好，同一個 head SHA 不會自動重驗**（R18）：R4 對
   `## 驗收結果：無法驗證（基線紅）` 只在人類指名時重驗；作者 rebase 讓 SHA 變了，
   下一輪也會重驗。
