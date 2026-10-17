@@ -271,6 +271,19 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 所以整個 repo 都不寫。缺的 label 不要自己建（改 repo 設定屬於第 2 類），在整輪
 那一則 @ 裡請人類建立。
 
+### 3. 記下本輪的台北時間小時
+
+**整輪只讀一次**，之後一律用這個值，不要每張單各自重讀（跑到一半跨過整點，同一輪
+前後判斷就會不一致）：
+
+```bash
+mkdir -p /tmp/acceptance-review
+TZ=Asia/Taipei date +%H > /tmp/acceptance-review/run_hour && echo "RUN_HOUR=$(cat /tmp/acceptance-review/run_hour)"
+```
+
+`RUN_HOUR` 是 `09` 的那一輪是「當天第一次排程」，步驟 1 用它決定「升級做到一半」
+要不要併進 @。
+
 ## 流程（每張 issue 依序做）
 
 **失敗只影響那一張**：對單一 issue 的任何查詢或寫入失敗，記下來、跳過這張，
@@ -280,23 +293,37 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 ### 1. 先看 issue 本身
 
 - 帶 `needs-human` → 不驗收、不送回、不留言，但先看是不是**升級做到一半**
-  （R15 第 1 步加了 label，之後被中斷，issue 上沒有說明留言）：
+  （R15 第 1 步加了 label，之後被中斷，沒有貼出這次的說明留言）。用時間判斷，
+  不用「有沒有升級留言」判斷——issue 上可能留著**上一次**、人類早已處理完的
+  升級留言：
 
   ```bash
-  # 最後一次貼 needs-human 的人，以及 issue 上有沒有 Summer 的升級留言（任何簽名都算）
-  gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
-    --jq '.[] | select(.event == "labeled" and .label.name == "needs-human") | "\(.created_at) \(.actor.login)"' | sort | tail -n 1
-  gh api "repos/$REPO/issues/$NUM/comments" --paginate \
-    --jq '[.[] | select(.user.login == "wman-pm" and (.body | split("\n")[0] | sub("^\\s+"; "") | startswith("## 需要人類決定（needs-human）")))] | length'
+  LBL_AT=; CMT_AT=; HALF=CHECK_FAILED
+  # wman-pm 最後一次貼 needs-human 的時間，與 wman-pm 最後一則升級留言（任何簽名都算）的時間
+  if RAW=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
+       --jq '.[] | select(.event == "labeled" and .label.name == "needs-human" and .actor.login == "wman-pm") | .created_at') \
+     && LBL_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1) \
+     && RAW=$(gh api "repos/$REPO/issues/$NUM/comments" --paginate \
+       --jq '.[] | select(.user.login == "wman-pm" and (.body | split("\n")[0] | sub("^\\s+"; "") | startswith("## 需要人類決定（needs-human）"))) | .created_at'); then
+    CMT_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+    # label 是 Summer 貼的，而且晚於 Summer 最後一則升級留言（或根本沒有留言）→ 做到一半
+    # ISO 8601 UTC 時間字串可以直接排序比大小（同 backlog-triage 的寫法）
+    if [ -n "$LBL_AT" ] && { [ -z "$CMT_AT" ] || { [ "$LBL_AT" != "$CMT_AT" ] \
+      && [ "$(printf '%s\n%s\n' "$LBL_AT" "$CMT_AT" | sort | tail -n 1)" = "$LBL_AT" ]; }; }; then
+      HALF=yes
+    else
+      HALF=no
+    fi
+  fi
+  echo "half=$HALF label_at=$LBL_AT comment_at=$CMT_AT"
   ```
 
-  - 最後貼 label 的是 `wman-pm`，**而且**第二個指令印 `0`（沒有任何 Summer 的
-    升級留言）→ 升級做到一半：人類可能完全不知道這張在等他。摘要**點名**列出
-    「needs-human 已貼但沒有升級說明」；**當天第一次排程（台北時間 09 點那一輪，
-    `TZ=Asia/Taipei date +%H` 是 `09`）把它併進整輪那一則 @**，其他輪只列在摘要，
-    不每小時 @。不補貼說明留言（不知道當初卡在什麼，補了只會亂寫）。
-  - 其他情況 → 摘要列出「等人類決定中」。
-  - 任一查詢失敗 → 摘要列出「等人類決定中（升級狀態查詢失敗）」。
+  - `half=yes` → 升級做到一半：人類可能完全不知道這張在等他。摘要**點名**列出
+    「needs-human 已貼但沒有升級說明」；**本輪是 09 點那一輪（見預檢 3 的
+    `RUN_HOUR`）才把它併進整輪那一則 @**，其他輪只列在摘要，不每小時 @。不補貼
+    說明留言（不知道當初卡在什麼，補了只會亂寫）。
+  - `half=no` → 摘要列出「等人類決定中」。
+  - `half=CHECK_FAILED` → 摘要列出「等人類決定中（升級狀態查詢失敗）」。
 - issue 不是 `OPEN` → 跳過。
 
 ### 2. 找出對應 PR——優先用 GraphQL 原生關聯，留言比對是 fallback
@@ -337,33 +364,38 @@ echo "$GRAPHQL_OUTPUT"
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
-# 第一行是 head SHA，其餘是 key=value；只用 gh 內建的 --jq，不依賴另外裝 jq
+# 第一行是 head SHA、第二行是 PR 的 base 分支，其餘是 key=value；只用 gh 內建的 --jq，不依賴另外裝 jq
 gh pr view "$PR_NUM" --repo "$REPO" \
-  --json url,state,author,headRefOid,mergeable,mergeStateStatus \
-  --jq '"\(.headRefOid)\nurl=\(.url)\nstate=\(.state)\nauthor=\(.author.login)\nmergeable=\(.mergeable)\nmergeStateStatus=\(.mergeStateStatus)"' \
+  --json url,state,author,headRefOid,baseRefName,mergeable,mergeStateStatus \
+  --jq '"\(.headRefOid)\n\(.baseRefName)\nurl=\(.url)\nstate=\(.state)\nauthor=\(.author.login)\nmergeable=\(.mergeable)\nmergeStateStatus=\(.mergeStateStatus)"' \
   > "$STATE/pr.txt" && head -n 1 "$STATE/pr.txt" > "$STATE/head_sha" \
-  && grep -Eq '^[0-9a-f]{40}$' "$STATE/head_sha" && echo "head=$(cat "$STATE/head_sha")"
+  && sed -n 2p "$STATE/pr.txt" > "$STATE/base_ref" \
+  && grep -Eq '^[0-9a-f]{40}$' "$STATE/head_sha" && [ -s "$STATE/base_ref" ] \
+  && echo "head=$(cat "$STATE/head_sha") base=$(cat "$STATE/base_ref")"
 cat "$STATE/pr.txt"
 ```
 
-沒有印出 `head=` 加 40 碼 SHA → 查詢失敗，歸類「異常」。
+沒有印出 `head=<40 碼 SHA> base=<分支名>` → 查詢失敗，歸類「異常」。
 
 **3a. 一次撈齊判斷要用的事實**（整段放在同一次 Bash 呼叫裡跑）：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 HEAD_SHA=$(cat "$STATE/head_sha")
-FACTS_OK=yes; MARK=; REV_AT=; REC=; FAIL_AT=; STALL_N=
+FACTS_OK=yes; MARK=; MARK_AT=; REV=; REV_AT=; REV_AGE=; REC=; FAIL_AT=; AFTER_REV_N=; STALL_N=
 # gh 失敗要先接住再 sort：寫成 X=$(gh … | sort) 的話，失敗會被 sort 的 exit 0 蓋掉
 # (1) 最新的 pr-review-response 標記：時間、種類（start／done／failed）、距今秒數
 if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
   --jq '.[] | (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "")) as $h | select($h | startswith("<!-- pr-review-response:")) | "\(.created_at) \($h | capture("pr-review-response:(?<k>[a-z]+)") | .k) \((now - (.created_at | fromdateiso8601)) | floor)"'); then
   MARK=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+  MARK_AT=$(printf '%s\n' "$MARK" | cut -d' ' -f1)
 else FACTS_OK=no; fi
-# (2) Summer 在目前這個 SHA 上最新一次 Request changes 的時間
+# (2) Summer 在目前這個 SHA 上最新一次 Request changes：時間與距今秒數
 if RAW=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
-  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$HEAD_SHA\") | .submitted_at"); then
-  REV_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$HEAD_SHA\") | \"\(.submitted_at) \((now - (.submitted_at | fromdateiso8601)) | floor)\""); then
+  REV=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+  REV_AT=$(printf '%s\n' "$REV" | cut -d' ' -f1)
+  REV_AGE=$(printf '%s\n' "$REV" | cut -s -d' ' -f2)
 else FACTS_OK=no; fi
 # (3) 紀錄留言（固定標題表的前四種、而且有 head SHA 的），PR 與 issue 兩邊都撈
 REC_JQ='.[] | select(.user.login == "wman-pm")
@@ -381,25 +413,36 @@ if PR_REC=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$REC_J
   REC=$(printf '%s\n' "$ALL_REC" | tail -n 1)
   # 目前這個 SHA 最新一則「不通過」紀錄的時間
   FAIL_AT=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" '$2 == s && index($3, "## 驗收結果：不通過") == 1 {t = $1} END {print t}')
+  # 目前這個 SHA、晚於 rev_at 的「不通過」或第 5 類升級紀錄有幾則（R2 用；沒有 rev_at 時無意義）
+  AFTER_REV_N=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" -v r="$REV_AT" \
+    '$2 == s && $1 > r && (index($3, "## 驗收結果：不通過") == 1 || index($3, "## 需要人類決定（needs-human）") == 1) {n++} END {print n + 0}')
 else FACTS_OK=no; fi
-# (4) 這個 SHA 是不是已經通報過停滯
+# (4) 這個 SHA 是不是已經通報過停滯（兩種原因共用同一個標題，每個 SHA 只報一次）
 if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
   --jq "[.[] | select(.user.login == \"wman-pm\" and (.body | split(\"\n\")[0] | sub(\"^\\\\s+\"; \"\") | startswith(\"## 驗收停滯：作者已回應但未更新\")) and (.body | contains(\"head SHA：$HEAD_SHA\")))] | length"); then
   STALL_N=$(printf '%s\n' "$RAW" | awk '{n += $1} END {print n + 0}')
 else FACTS_OK=no; fi
 echo "facts_ok=$FACTS_OK head=$HEAD_SHA"
-echo "mark=$MARK"          # <時間> <start|done|failed> <距今秒數>，沒有標記就空白
-echo "rev_at=$REV_AT"      # 目前 SHA 上 Summer 最新的 Request changes 時間，沒有就空白
-echo "rec=$REC"            # 最新紀錄：<時間>\t<SHA>\t<標題>，沒有就空白
-echo "fail_at=$FAIL_AT"    # 目前 SHA 最新「不通過」紀錄的時間，沒有就空白
-echo "stall_n=$STALL_N"    # 目前 SHA 已通報停滯幾次
+echo "mark=$MARK"                # <時間> <start|done|failed> <距今秒數>，沒有標記就空白
+echo "rev_at=$REV_AT rev_age=$REV_AGE"  # 目前 SHA 上 Summer 最新的 Request changes 時間與距今秒數，沒有就空白
+echo "after_rev_n=$AFTER_REV_N"  # 目前 SHA 上、晚於 rev_at 的不通過／第 5 類升級紀錄數
+echo "rec=$REC"                  # 最新紀錄：<時間>\t<SHA>\t<標題>，沒有就空白
+echo "fail_at=$FAIL_AT"          # 目前 SHA 最新「不通過」紀錄的時間，沒有就空白
+echo "stall_n=$STALL_N"          # 目前 SHA 已通報停滯幾次
+# 作者在 rev_at 之後有沒有任何回應（R2、R3 用）
+if [ -n "$REV_AT" ] && [ -n "$MARK_AT" ] && [ "$MARK_AT" != "$REV_AT" ] \
+  && [ "$(printf '%s\n%s\n' "$REV_AT" "$MARK_AT" | sort | tail -n 1)" = "$MARK_AT" ]; then
+  echo "mark_after_rev=yes"
+else
+  echo "mark_after_rev=no"
+fi
 ```
 
 `facts_ok=no` → 判斷不了，**這張跳過**，歸類「異常」。不能當成「沒驗過」重跑：
 會重送 review、多算一次重做。
 
 `--paginate` 時 `--jq` 是逐頁各跑一次，`length` 會變成每頁一個數字，所以 (4)
-用 `awk` 把各頁加總。
+用 `awk` 把各頁加總。ISO 8601 的 UTC 時間字串可以直接用字串比大小。
 
 **3b. 依序判斷，第一個符合的就照做**（`mark` 的距今秒數 < 7200 叫「新的
 `start`」，≥ 7200 叫「逾時的 `start`」；2 小時和 `pr-review-response` 的並行
@@ -408,20 +451,26 @@ echo "stall_n=$STALL_N"    # 目前 SHA 已通報停滯幾次
 
 | # | 條件 | 做什麼 |
 | --- | --- | --- |
+| R2 | `rev_at` 有值，而且 `after_rev_n` 是 0（目前 SHA 上沒有晚於那則 review 的不通過或第 5 類升級紀錄） | **送回做到一半**：Summer 在這個 SHA 送了 Request changes，之後的觸發或不通過留言沒做完（失敗或被中斷）。走 8d「續做送回」，**不重跑測試、不再送第二則 review**。排在 R1 前面也安全：作者若已經開始處理，他的標記一定晚於 `rev_at`（`mark_after_rev=yes`），8d 就不會再觸發 |
 | R1 | `mark` 是新的 `start` | **跳過**：Rick/Morty 正在原分支補 commit，現在的 head 可能只改到一半，驗了只會把半成品判成不通過、白白用掉重做額度。摘要計入「作者處理 review 中」 |
-| R2 | `rev_at` 有值，而且 `rec` 的 SHA 不是目前的 SHA（這個 SHA 沒有任何紀錄留言） | **送回做到一半**：上一輪送了 Request changes，之後的觸發或不通過留言沒做完（失敗或被中斷）。走 8d「續做送回」，**不重跑測試、不再送第二則 review** |
-| R3 | `fail_at` 有值，`mark` 的時間晚於參考時間，而且 `mark` 是 `done`、`failed` 或逾時的 `start` | **停滯**：作者回應了（提問、反駁、說超出範圍、失敗，或做到一半卡住），PR head 卻沒變。`stall_n` 是 0 → 走 8e「通報停滯」；≥ 1 → 跳過，摘要計入「停滯（已通報）」。**絕不重送** |
+| R3 | `fail_at` 有值，`mark` 的時間晚於參考時間，而且 `mark` 是 `done`、`failed` 或逾時的 `start` | **停滯（作者已回應但未更新）**：作者回應了（提問、反駁、說超出範圍、失敗，或做到一半卡住），PR head 卻沒變。`stall_n` 是 0 → 走 8e「通報停滯」；≥ 1 → 跳過，摘要計入「停滯（已通報）」。**絕不重送** |
+| R3' | `fail_at` 與 `rev_at` 都有值，`mark_after_rev=no`（作者完全沒有回應），而且 `rev_age` ≥ 7200 | **停滯（作者未回應）**：觸發送出超過 2 小時，作者連 `start` 都沒貼（bot 沒醒、觸發被吃掉）。處理同 R3：`stall_n` 是 0 → 8e（原因寫「作者未回應」）；≥ 1 → 跳過。**絕不重送** |
 | R4 | `rec` 的 SHA 等於目前的 SHA | **冪等**：標題是 `## 驗收結果：無法驗證（測試環境）` 而且這次是**指名單張**觸發 → 人類多半修好了環境，繼續往下驗；標題是無法驗證、排程觸發 → 跳過，摘要計入「無法驗證（等環境修好）」；其他標題 → 跳過，摘要計入「已驗過」 |
 | R5 | `mergeable` 是 `UNKNOWN`（剛 push 完常見） | 跳過，下一輪再看，不算失敗。摘要計入「待 GitHub 算合併狀態」 |
 | — | 以上都不符合 | 繼續步驟 4 |
 
 幾點說明：
 
-- R3 的參考時間用 `rev_at` 而不是 `fail_at`：送回的順序是 review → 觸發 → 留言，
-  作者收到觸發後可能比 Summer 的不通過留言更早貼出 `start`；拿 review 時間比，
-  才不會漏掉這一輪的回應。
-- R3 只在 PR head **沒變**時成立：作者推了新 commit，SHA 就變了，`fail_at` 是空
-  的，直接走 R4 以後的正常驗收。
+- R2 只看「晚於 `rev_at`」的紀錄，不看「最新紀錄的 SHA 是不是目前的 SHA」：
+  同一個 SHA 先有一則「無法驗證」、之後人類指名重驗才送回；或是 force push
+  X→Y→X 回到舊的 SHA——這兩種情況下目前 SHA 上早就有舊紀錄，只比 SHA 會把
+  做到一半的送回誤判成「驗過了」。
+- R3 的參考時間用 `rev_at` 而不是 `fail_at`：作者收到觸發後，可能比 Summer 的
+  不通過留言更早貼出 `start`；拿 review 時間比，才不會漏掉這一輪的回應。
+- R3' 只在 `rev_at` 有值時成立：作者不是 bot 帳號、或第 5 類升級那兩條路沒有送
+  review、也沒有觸發，本來就不會有作者的標記，不能算「沒回應」。
+- R3、R3' 只在 PR head **沒變**時成立：作者推了新 commit，SHA 就變了，`fail_at`
+  是空的，直接走 R4 以後的正常驗收。
 - 驗收基準那種 needs-human 留言**刻意不寫 SHA**：寫了的話，人類補上基準之後
   PR head 沒變，R4 就會把它當成「驗過了」永遠跳過。
 
@@ -499,7 +548,7 @@ git -C "$BASE" fetch origin "+refs/pull/$PR_NUM/head:refs/remotes/origin/accept-
 git -C "$BASE" worktree prune
 # 上一輪被中斷留下的同名 worktree 先清掉；目錄還在、卻沒註冊成 worktree 的（remove 會失敗），直接刪目錄
 [ -e "$WT" ] && git -C "$BASE" worktree remove --force "$WT"
-[ -e "$WT" ] && /bin/rm -rf "$WT"
+[ -e "$WT" ] && /bin/rm -rf "$WT" && git -C "$BASE" worktree prune
 if git -C "$BASE" worktree add --detach "$WT" "$HEAD_SHA" \
   && [ "$(git -C "$WT" rev-parse HEAD)" = "$HEAD_SHA" ]; then
   echo "WT_OK $WT"
@@ -510,23 +559,25 @@ fi
 
 `WT_FAILED` → 環境跑不起來（見 6c），不是作者的錯。
 
-**6b. 測試指令一律從 base branch 讀，不從 PR head 讀**：作者可以在同一張 PR
-裡把 `CLAUDE.md` 的測試指令改弱或刪掉，從 PR head 讀等於讓被驗的人自己決定
-怎麼驗。指令來自預設分支，**執行地點**才是 PR head 的 worktree：
+**6b. 測試指令一律從 PR 的 base branch 讀，不從 PR head 讀**：作者可以在同一張
+PR 裡把 `CLAUDE.md` 的測試指令改弱或刪掉，從 PR head 讀等於讓被驗的人自己決定
+怎麼驗。指令來自 PR 要合進去的那個分支（`baseRefName`，步驟 3 存在
+`$STATE/base_ref`），**執行地點**才是 PR head 的 worktree：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
-BASE="/home/node/repos/$OWNER/$REPO_NAME"; HEAD_SHA=$(cat "$STATE/head_sha")
-if DEF=$(gh repo view "$REPO" --json defaultBranchRef --jq '.defaultBranchRef.name') && [ -n "$DEF" ]; then
-  printf '%s' "$DEF" > "$STATE/default_branch"
+BASE="/home/node/repos/$OWNER/$REPO_NAME"; HEAD_SHA=$(cat "$STATE/head_sha"); BREF=$(cat "$STATE/base_ref")
+if [ -n "$BREF" ] && git -C "$BASE" rev-parse --verify -q "origin/$BREF" >/dev/null; then
+  echo "BASE_REF_OK origin/$BREF"
   for DOC in CLAUDE.md AGENTS.md; do
-    git -C "$BASE" show "origin/$DEF:$DOC" > "$STATE/base-$DOC" 2>/dev/null && echo "BASE_DOC $DOC" || /bin/rm -f "$STATE/base-$DOC"
+    git -C "$BASE" show "origin/$BREF:$DOC" > "$STATE/base-$DOC" 2>/dev/null && echo "BASE_DOC $DOC" || /bin/rm -f "$STATE/base-$DOC"
   done
-  git -C "$BASE" cat-file -e "origin/$DEF:pubspec.yaml" 2>/dev/null && echo "FLUTTER_REPO"
-  # PR 相對 base 動了哪些檔（A/M/D/R），給下面的「動到測試」檢查用
-  git -C "$BASE" diff --name-status "origin/$DEF...$HEAD_SHA" > "$STATE/changed.tsv" && echo "DIFF_OK"
+  git -C "$BASE" cat-file -e "origin/$BREF:pubspec.yaml" 2>/dev/null && echo "FLUTTER_REPO"
+  # PR 相對 base 動了哪些檔。--no-renames：改名會拆成 D（舊路徑）＋A（新路徑），
+  # 把測試檔改名搬出 test/ 也會留下一行 D，不會因為只看新路徑而漏報
+  git -C "$BASE" diff --no-renames --name-status "origin/$BREF...$HEAD_SHA" > "$STATE/changed.tsv" && echo "DIFF_OK"
 else
-  echo "DEFAULT_BRANCH_FAILED"
+  echo "BASE_REF_FAILED"
 fi
 ```
 
@@ -537,23 +588,37 @@ fi
 - repo 有 mise 設定檔（`.mise.toml`／`mise.toml`）時先在 worktree 跑
   `mise trust` 與 `mise install`。
 - **最後的指令清單是空的**（不是 Flutter，文件裡也找不到任何測試指令），或印出
-  `DEFAULT_BRANCH_FAILED`、沒印出 `DIFF_OK` → 沒有測試證據，**絕不算通過**：
+  `BASE_REF_FAILED`、沒印出 `DIFF_OK` → 沒有測試證據，**絕不算通過**：
   照「環境跑不起來」處理（6c），結果走 8c「無法驗證」。
+- **把指令的實際來源寫進狀態檔**，結果留言照抄它，不要寫死「CLAUDE.md」：
 
-**PR 動到測試或測試指令，要讓人類看見**：
+  ```bash
+  STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+  # 例：base branch `main` 的 CLAUDE.md＋Flutter 最低要求（flutter analyze、flutter test）
+  printf '%s' '<base branch `<分支>` 的哪份文件（CLAUDE.md／AGENTS.md／兩者）＋是否套用 Flutter 最低要求>' > "$STATE/test_source"
+  ```
+
+**PR 動到測試、測試指令或測試設定，要讓人類看見**：指令雖然來自 base，執行時
+讀的設定檔卻來自 PR head——`analysis_options.yaml` 可以關掉 lint、
+`dart_test.yaml` 可以跳過測試、`pubspec.yaml` 可以換掉測試相依、`Makefile`／
+mise 設定可以改掉指令實際做的事。這些一律列出來：
 
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
-# 動到 CLAUDE.md／AGENTS.md，或測試檔（test/、integration_test/、*_test.*、test_*）；D 開頭是刪除
-awk -F '\t' '{p = $NF} p ~ /(^|\/)(CLAUDE|AGENTS)\.md$/ || p ~ /(^|\/)(test|tests|integration_test)\// || p ~ /(_test\.[a-z]+|(^|\/)test_[^\/]*)$/ {print}' \
+# 測試指令文件、測試設定檔、測試檔（test/、tests/、integration_test/、*_test.*、test_*）；D 開頭是刪除
+awk -F '\t' '{p = $NF}
+  p ~ /(^|\/)(CLAUDE|AGENTS)\.md$/ \
+  || p ~ /(^|\/)(analysis_options\.yaml|dart_test\.yaml|pubspec\.yaml|Makefile|mise\.toml|\.mise\.toml)$/ \
+  || p ~ /(^|\/)(test|tests|integration_test)\// \
+  || p ~ /(_test\.[a-z]+|(^|\/)test_[^\/]*)$/ {print}' \
   "$STATE/changed.tsv" > "$STATE/sensitive.tsv"
 cat "$STATE/sensitive.tsv"
 ```
 
 有輸出 → 在這張的結果留言（通過、不通過、無法驗證都一樣）加一段
 「⚠️ 本 PR 動到測試或測試指令」，逐行列出（`D` 開頭的標明「刪除」）。這不會讓
-結果變成不通過——改測試本來就常見——但人類 merge 前要看得到；刪掉測試檔、或
-把 base 的測試指令改弱，人類可能就不該 merge。
+結果變成不通過——改測試、改設定本來就常見——但人類 merge 前要看得到；刪掉測試
+檔、或把測試設定改弱，人類可能就不該 merge。
 
 **逐一執行**：每個指令都照這個模式跑，把 exit code 與 log 存進狀態目錄：
 
@@ -577,7 +642,7 @@ tail -n 15 "$STATE/$NAME.log"
 - **測試失敗（作者的問題）**：指令真的跑起來了，回報測試沒過、analyze 有問題。
 - **環境跑不起來（Summer 這邊的問題）**：`flutter`／`mise` 找不到（exit 127、
   `command not found`）、mise 報錯、`flutter pub get` 下載失敗、6a 的
-  `WT_FAILED`、6b 拿不到測試指令（清單是空的、查不到預設分支）。分不清是哪一種時，**當作環境跑不起來**：送回給作者修不了
+  `WT_FAILED`、6b 拿不到測試指令（清單是空的、查不到 PR 的 base branch）。分不清是哪一種時，**當作環境跑不起來**：送回給作者修不了
   Summer 的環境，只會讓 Rick/Morty 白跑一輪、用掉重做額度。
 
 **6d. 一定要移除 worktree**（測試過或沒過、中途出錯都要做）：
@@ -632,7 +697,7 @@ cat "$STATE/pr_final.txt"
 | --- | --- |
 | **通過** | 每條驗收條件都是 ✅ 或 ❓、測試清單不是空的而且全部 exit 0、沒有衝突 |
 | **不通過** | 有任何 ❌、測試失敗、或有衝突 |
-| **無法驗證（測試環境）** | 沒有上一列任何一項，但測試因環境跑不起來，或拿不到測試指令（6b 清單是空的、查不到預設分支） |
+| **無法驗證（測試環境）** | 沒有上一列任何一項，但測試因環境跑不起來，或拿不到測試指令（6b 清單是空的、查不到 PR 的 base branch） |
 
 「不通過」又碰上環境問題時（例如有 ❌，而且測試也跑不起來）照「不通過」處理，
 在理由裡註明測試因環境沒跑成。
@@ -666,7 +731,7 @@ if [ -s "$STATE/sensitive.tsv" ]; then
   printf '\n### ⚠️ 本 PR 動到測試或測試指令（merge 前請確認）\n\n'
   awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
 fi
-printf '\n### 測試（指令來自 base branch `%s` 的 CLAUDE.md，在上面那個 head SHA 的乾淨 checkout 執行）\n' "$(cat "$STATE/default_branch")"
+printf '\n### 測試（指令來源：%s；在上面那個 head SHA 的乾淨 checkout 執行）\n' "$(cat "$STATE/test_source")"
 while IFS="$(printf '\t')" read -r NAME RC CMD; do
   printf '\n`%s` → exit %s\n\n~~~\n' "$CMD" "$RC"
   tail -n 15 "$STATE/$NAME.log"
@@ -825,7 +890,7 @@ Summer 的測試環境跑不起來，這個 commit 沒有自跑測試的證據�
 驗收條件逐條比對：<全部 ✅／❓ 的摘要>
 
 跑不起來的原因：
-- <`flutter analyze` exit 127：flutter: command not found／base branch 的 CLAUDE.md 找不到任何測試指令／查不到預設分支>
+- <`flutter analyze` exit 127：flutter: command not found／base branch 的 CLAUDE.md 找不到任何測試指令／查不到 PR 的 base branch>
 
 需要人類處理（修好 Summer 的測試環境，或在 base branch 的 CLAUDE.md 寫明測試指令），之後在 Discord 指名重驗：「執行 acceptance-review skill <owner>/<repo>#<issue 編號>」。
 EOF
@@ -857,20 +922,31 @@ printf '\n---\n— By Summer (acceptance-review)\n'
      --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$(cat "$STATE/head_sha")\") | \"\(.submitted_at)\n\(.body)\n----\""
    ```
 
-3. **貼不通過留言**：用 8b 第 3 步的模板與確認指令，「不通過的項目」照抄上面
-   最新一則 review 的項目，「處理」寫「續做：上一輪已於 <review 時間> 送
+3. **先補觸發，只在作者還沒回應時**：步驟 3a 印出 `mark_after_rev=no`（沒有
+   標記，或標記不晚於 `rev_at`）→ 照 8b 步驟 ii 在 `bot-notify` 觸發作者（作者
+   ID 由 PR author login 決定；不是 `wman-dev`／`wman-review` 就不觸發）。
+   **發送失敗 → 停，什麼都不貼**，下一輪 R2 會再試。`mark_after_rev=yes` 代表
+   作者已經收到並回應過，跳過這一步、不重發。
+4. **最後才貼不通過留言**：用 8b 第 3 步的模板與確認指令，「不通過的項目」照抄
+   上面最新一則 review 的項目，「處理」寫「續做：上一輪已於 <review 時間> 送
    Request changes，本輪補記不通過紀錄」。這一步把冪等紀錄與重做計數補回來。
-   失敗 → 停，不觸發，下一輪 R2 會再試。
-4. **補觸發，只在作者還沒回應時**：步驟 3a 的 `mark` 是空白，或 `mark` 的時間
-   **不晚於** `rev_at` → 照 8b 步驟 ii 在 `bot-notify` 觸發作者（作者 ID 由 PR
-   author login 決定；不是 `wman-dev`／`wman-review` 就不觸發）。`mark` 晚於
-   `rev_at`，代表作者已經收到並回應過，不重發。
+   失敗 → 記進摘要，下一輪 R2 會再試。
 
-#### 8e. 通報停滯（步驟 3 的 R3）
+**順序為什麼是先觸發、後留言**：不通過留言一貼上，下一輪 `after_rev_n` 就不是 0，
+R2 不會再成立。若先留言、觸發卻失敗，這張 PR 就會停在「已記錄不通過、作者沒收到」，
+下一輪看起來和「作者還沒處理」一模一樣，安靜卡住。反過來，觸發成功、留言失敗時，
+下一輪會再觸發一次（作者若還沒貼標記）——重複觸發無害：`pr-review-response`
+發現沒有待處理的 review 就會自己結束。
 
-作者回應了上一輪的 Request changes，PR head 卻沒有新的 commit。原因可能是作者
-提問、反駁、認為超出範圍、`pr-review-response` 失敗，或 `start` 超過 2 小時沒有
-下文。**絕不重送**：同一個 SHA 再送一次，只會得到同樣的回應，而且每送一次都
+#### 8e. 通報停滯（步驟 3 的 R3、R3'）
+
+上一輪送了 Request changes，PR head 卻沒有新的 commit。兩種原因：
+
+- **R3：作者已回應但未更新**——作者提問、反駁、認為超出範圍、
+  `pr-review-response` 失敗，或 `start` 超過 2 小時沒有下文。
+- **R3'：作者未回應**——觸發送出超過 2 小時，作者連 `start` 都沒貼。
+
+**絕不重送**：同一個 SHA 再送一次，只會得到同樣的回應，而且每送一次都
 燒 Rick/Morty 的額度。改成讓人類知道，每個 SHA 只通報一次。
 
 在 PR 貼一則（第一行逐字照抄）：
@@ -882,9 +958,9 @@ printf '## 驗收停滯：作者已回應但未更新\n\nhead SHA：%s\n\n' "$(c
 cat <<'EOF'
 上一輪驗收不通過（issue #<issue 編號> 的「驗收結果：不通過」留言），已送 Request changes 給作者。
 
-作者的回應：<pr-review-response 最新標記是 done／failed／start 且已超過 2 小時>，時間 <標記時間>，但 PR head 仍是上面這個 SHA，沒有新的 commit。
+停滯原因：<R3：作者已回應但未更新——pr-review-response 最新標記是 done／failed／start 且已超過 2 小時，時間 <標記時間>／R3'：作者未回應——Request changes 於 <rev_at> 送出、已觸發作者，超過 2 小時沒有任何 pr-review-response 標記>。PR head 仍是上面這個 SHA，沒有新的 commit。
 
-本 skill 不會對同一個 SHA 再送回。需要人類看作者在 review thread 的回覆，決定要回覆作者、自己修改，還是關閉 PR。作者推了新 commit 之後，下一輪會自動重新驗收。
+本 skill 不會對同一個 SHA 再送回。需要人類看作者在 review thread 的回覆（或確認作者 bot 是否正常），決定要回覆作者、重新觸發、自己修改，還是關閉 PR。作者推了新 commit 之後，下一輪會自動重新驗收。
 EOF
 printf '\n---\n— By Summer (acceptance-review)\n'
 } | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
@@ -892,8 +968,9 @@ gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
   --jq ".[] | select(.user.login == \"wman-pm\" and (.body | startswith(\"## 驗收停滯：作者已回應但未更新\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
 ```
 
-確認指令有印出網址才算成功。**成功才**把這張併進整輪那一則 @（「作者已回應但
-沒有更新，需要你決定」附 PR 連結）；失敗 → 不 @，記進摘要，下一輪 R3 會再試
+兩種原因共用同一個第一行（`stall_n` 只認它），原因寫在內文。確認指令有印出網址
+才算成功。**成功才**把這張併進整輪那一則 @（「作者已回應但沒有更新」或「作者未
+回應」，附 PR 連結）；失敗 → 不 @，記進摘要，下一輪 R3／R3' 會再試
 ——先 @ 再留言的話，留言一直失敗就會每小時 @ 一次。
 
 ## 重做次數
@@ -932,8 +1009,9 @@ echo "rework=$REWORK failed=$FAILED_N reject=$REJECT_N"
 
 1. **整輪那一則 @ 人類**（只在 `bot-notify`，整輪最多一則，有要人處理的事才發）：
    合併本輪所有要人類動手的事——新的 `needs-human` 升級、驗收通過待 merge、
-   無法驗證（測試環境）、作者不是 bot 帳號的不通過、新通報的停滯（8e）、
-   needs-human 已貼但沒有升級說明（步驟 1，只在當天 09 點那一輪）、缺
+   無法驗證（測試環境）、作者不是 bot 帳號的不通過、新通報的停滯（8e，作者已
+   回應但未更新／作者未回應）、
+   needs-human 已貼但沒有升級說明（步驟 1，只在 `RUN_HOUR` 是 `09` 的那一輪）、缺
    `needs-human` label、gh 帳號不對。每項一句話加連結。≤ 2000 字，放不下就把
    超出的連結接在後續訊息，@ 只放第一則。
 2. **`pr-review` 觸發**：每張送回的 PR 一則，@ 的是 bot，見 8b 步驟 ii。
@@ -992,20 +1070,26 @@ Summer 若就是在 `bot-notify` 執行，摘要與那一則 @ 可以合併成�
 - **Summer 的測試環境還沒實機驗證過**：Summer 容器裝了 mise＋Flutter，但沒
   確認過能在 PR checkout 裡跑完 `flutter test`。跑不起來時本 skill 走「無法驗證
   （測試環境）」並 @ 人類，不會誤判通過。
-- **`pr-review` 可能被觸發兩次**：本 skill 在 Discord 觸發之外，若
-  `pr-review-poller` 已部署，它看到 Request changes 也會觸發作者。
-  `pr-review-response` 有 `start` 標記的並行防護，第二次會自己結束。
+- **`pr-review` 可能被觸發兩次**：
+  - 本 skill 在 Discord 觸發之外，若 `pr-review-poller` 已部署，它看到 Request
+    changes 也會觸發作者。
+  - 8d 先觸發、後補記：觸發成功、不通過留言卻貼失敗時，下一輪 R2 又成立；作者若
+    還沒貼任何標記（`mark_after_rev=no`），會再觸發一次。
+  - 兩種都無害：`pr-review-response` 有 `start` 標記的並行防護，沒有待處理的
+    review 時也會自己結束。
 - **送回後不通過留言貼失敗**：當場重貼一次；仍失敗，下一輪步驟 3 的 R2 看到「這個
-  SHA 有 Summer 的 Request changes 卻沒有紀錄」就走 8d 補記。補記之前若作者已經
-  推了新 commit，那一次就沒有記到，重做次數少算一次——要連續兩次寫入失敗、而且
-  作者在一小時內推完才會發生，接受。
+  SHA 有 Summer 的 Request changes，之後卻沒有不通過紀錄」就走 8d 補記。R2 只看
+  **目前的** head SHA：作者若在下一輪執行之前就推了新 commit，那一次就沒有記到，
+  重做次數少算一次。下一輪最晚是一小時後；21:30 那一輪之後要等到隔天 09:30，
+  這段期間窗口最長。要連續兩次寫入失敗才會發生，接受。
 - **停滯只靠 `pr-review-response` 的標記判斷**：作者沒有走那支 skill（例如人類
   手動在 PR 上回覆、沒有標記），本 skill 看不出作者回應過，這個 SHA 會一直算
   「已驗過」。Mac 組目前沒有部署 `pr-review-poller`，`start` 卡住也只能靠步驟 3
   的 2 小時逾時發現。
-- **R2 續做與作者的 `start` 標記**：作者在 Summer 貼不通過留言之前就開始處理時，
-  R1（新的 `start`）會先擋住；作者推了新 commit 就走正常驗收，沒推就在 `done`／
-  `failed` 之後由 R2 補記、再由 R3 通報停滯。
+- **R2 續做與作者的 `start` 標記**：R2 排在 R1 前面。作者在 Summer 貼不通過留言
+  之前就開始處理時，R2 先成立，8d 看到 `mark_after_rev=yes` 不重觸發、只補記；
+  之後作者推了新 commit 就走正常驗收，沒推就在 `done`／`failed` 之後由 R3 通報
+  停滯。
 - **通過後 issue 那行連結貼失敗不會補**：PR 上的結果已經在，下一輪冪等跳過。
 - **第 5 類升級後，人類移除 label、PR head 沒變**：本 skill 一直跳過這個 SHA，
   後續（送回、自己修、關 PR）完全由人類決定。
@@ -1015,3 +1099,8 @@ Summer 若就是在 `bot-notify` 執行，摘要與那一則 @ 可以合併成�
   這時也還沒貼不通過留言，人類移除 label 後同一個 SHA 會再驗一次、再升級一次，
   機率極低，接受。
 - **找 PR 依賴 `Closes #N`**：沒寫時退到留言比對，兩者都落空才是「異常」。
+- **usercron 必須設定 `timezone = "Asia/Taipei"`**：`30 9-21 * * *` 要以台北時間
+  解讀，「09 點那一輪」（預檢 3 的 `RUN_HOUR`）才會是當天第一輪。`timezone`
+  不設的話預設是 UTC（`CRONJOB.md` 欄位表），整個排程差 8 小時：會跑在台北時間
+  17:30–05:30，`RUN_HOUR` 永遠不會是 `09`，「升級做到一半」的 @ 就從不發出。部署時在 `cronjob.toml` 確認這一項（時程與
+  設定以 `openab-ops` 的 `CRONJOB.md` 為準）。
