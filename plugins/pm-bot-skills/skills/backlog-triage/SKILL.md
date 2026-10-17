@@ -214,6 +214,7 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 ```bash
 # 開頭清空：不沿用上一張單（或上一次呼叫）留下的值
 REWORK=FAILED; FAILED_N=; REJECT_N=; LAST_FAILED_AT=; LAST_ACTIVE_AT=; WORKER_COMMENT=NOT_CHECKED
+LABEL_STATE=NOT_CHECKED; POLLER_OWNS=NOT_CHECKED; CMT=; BASE=
 # timeline 會分頁；--paginate 時 --jq 是逐頁各跑一次，所以每個事件輸出一行再數行數，
 # 不能在 jq 裡用 length（會變成每頁一個數字）
 if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
@@ -232,8 +233,36 @@ if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
     WORKER_COMMENT=$(gh issue view "$NUM" --repo "$REPO" --json comments \
       --jq "[.comments[] | select((.author.login == \"wman-dev\" or .author.login == \"wman-review\") and .createdAt > \"$LAST_ACTIVE_AT\")] | last | .body") || WORKER_COMMENT=QUERY_FAILED
   fi
+  # 段 2 用：label 狀態。最後一次認領晚於最後一次 agent-failed，代表單子已被重新認領過、
+  # agent-failed 是殘留（例如放行時移除失敗），不是一次新的失敗
+  if [ -z "$LAST_FAILED_AT" ]; then
+    LABEL_STATE=no_failed_event
+  elif [ -n "$LAST_ACTIVE_AT" ] && [ "$LAST_ACTIVE_AT" != "$LAST_FAILED_AT" ] \
+    && [ "$(printf '%s\n%s\n' "$LAST_FAILED_AT" "$LAST_ACTIVE_AT" | sort | tail -n 1)" = "$LAST_ACTIVE_AT" ]; then
+    LABEL_STATE=inconsistent
+  else
+    LABEL_STATE=ok
+  fi
+  # 段 2 用：poller 會不會自己接手（照 poller 的 failed_pending 判斷，兩邊才不會搶同一張）。
+  # 基準點 = max(最後一次 labeled agent-failed, 最後一則 Rick/Morty 留言)；基準點之後只要有
+  # 一則作者不是三個 bot 帳號的留言，就算人類回覆、poller 會續作。Summer（wman-pm）的留言
+  # 不算人類，也不移動基準點
+  if CMT=$(gh issue view "$NUM" --repo "$REPO" --json comments \
+    --jq '.comments[] | "\(.createdAt) \(if (.author.login == "wman-dev" or .author.login == "wman-review") then "worker" elif .author.login == "wman-pm" then "pm" else "human" end)"'); then
+    BASE=$( { printf '%s\n' "$LAST_FAILED_AT"; printf '%s\n' "$CMT" | awk '$2 == "worker" {print $1}'; } | grep . | sort | tail -n 1)
+    if [ -z "$BASE" ]; then
+      POLLER_OWNS=no
+    elif printf '%s\n' "$CMT" | awk -v b="$BASE" '$2 == "human" && $1 > b {f = 1} END {exit !f}'; then
+      POLLER_OWNS=yes
+    else
+      POLLER_OWNS=no
+    fi
+  else
+    POLLER_OWNS=FAILED
+  fi
 fi
 echo "rework=$REWORK failed=$FAILED_N reject=$REJECT_N last_failed=$LAST_FAILED_AT last_active=$LAST_ACTIVE_AT"
+echo "label_state=$LABEL_STATE poller_owns=$POLLER_OWNS"
 echo "--- worker_comment ---"
 printf '%s\n' "$WORKER_COMMENT"
 ```
@@ -244,8 +273,21 @@ printf '%s\n' "$WORKER_COMMENT"
   能當成 0。
 
 `last_failed`（最後一次貼 `agent-failed` 的時間，下文寫作 `LAST_FAILED_AT`）、
-`last_active`（最後一次被 poller 認領的時間，`LAST_ACTIVE_AT`）與
-`worker_comment` 段 2 也會用到，一律取**這張單這一次**執行印出的值。
+`last_active`（最後一次被 poller 認領的時間，`LAST_ACTIVE_AT`）、
+`label_state`、`poller_owns` 與 `worker_comment` 段 2 也會用到（段 1 只看
+`rework`），一律取**這張單這一次**執行印出的值：
+
+- `poller_owns=yes`：人類在失敗之後回覆了，poller 會自己把單子叫回原本那隻 bot
+  續作。**這張歸 poller，Summer 不修、不放行**——兩條路同時動會搶同一張單。
+  這個判斷刻意和 poller 的 `failed_pending` 用同一套規則：只看「最後一則留言是
+  不是 `wm4n`」的話，Summer 自己的 `## Summer 已修正規格` 留言會把人類的回覆
+  蓋過去，Summer 以為沒人回覆，poller 卻照樣續作。
+- `poller_owns=FAILED`／`NOT_CHECKED`：判斷不了，不修、不放行。
+- `label_state=inconsistent`：最後一次認領晚於最後一次 `agent-failed`，代表
+  單子已經被重新認領過，`agent-failed` 是殘留的 label，不是一次新的失敗。
+  **不修、不放行**，否則同一張單會被放行兩次。
+- `label_state=no_failed_event`：timeline 找不到任何 `labeled agent-failed`，
+  label 狀態說不通，不修、不放行。
 
 ### WIP
 
@@ -306,9 +348,9 @@ gh issue view "$NUM" --repo "$REPO" --json state,labels,comments
 ```
 
 必須同時成立：`state` 是 `OPEN`；帶著 `SRC`；**沒有** `needs-human`、
-`ready-for-agent`、`agent-active`、`agent-done`。段 2 另外要確認這時最後一則
-留言仍不是「晚於 `LAST_FAILED_AT` 的 `wm4n` 留言」（見段 2 步驟 2）。任一不
-成立就不放行。
+`ready-for-agent`、`agent-active`、`agent-done`。段 2 另外要對這張單**重跑一次**
+「重做次數」那整段，確認仍是 `poller_owns=no` 且 `label_state=ok`——人類可能在
+Summer 修規格的這段時間裡回覆了。任一不成立就不放行。
 
 **2. 重查 WIP**（見「WIP」）。≥ 2 或查詢失敗 → 不放行，並結束本輪所有放行。
 
@@ -350,11 +392,16 @@ poller 撿得到它**，也不會有任何錯誤訊息。步驟 4 已經成功�
   1. 立刻再跑一次移除 `agent-failed`。成功就照常做步驟 6。
   2. 仍失敗 → 用 `gh issue view "$NUM" --repo "$REPO" --json labels` 看現況：
      - 還帶 `ready-for-agent`（poller 還沒認領）→ **回滾**：移除
-       `ready-for-agent`，單子回到放行前的 `agent-failed`，不留放行留言，記進
-       摘要。下一輪段 2 會從步驟 5 接著做、重新放行。
-     - 已經變成 `agent-active`（poller 已認領）→ 不要再動 label，記進摘要並在
-       `bot-notify` 的那一則 @ 裡請人類手動移除 `agent-failed`（併入整輪唯一
-       的 @）。
+       `ready-for-agent`，不留放行留言。回滾後**再用同一個 `gh issue view
+       --json labels` 確認一次**：只剩 `agent-failed` 就是回到放行前的狀態，
+       記進摘要，下一輪段 2 會從步驟 5 接著做、重新放行；若看到的是
+       `agent-active`＋`agent-failed`（poller 在回滾前一刻認領了），改走下一項。
+     - 已經是 `agent-active`＋`agent-failed`（poller 已認領）→ **label 狀態
+       不一致**，不要再動 label。記進摘要，並在 `bot-notify` 的那一則 @ 裡
+       （併入整輪唯一的 @）寫：「請確認最後只留 `agent-active`（必要時補回
+       `agent-active` 並移除 `agent-failed`）」——poller 可能已經把
+       `agent-active` 拿掉了，所以不能只說「移除 `agent-failed`」。之後的段 2
+       會因為 `label_state=inconsistent` 不再碰這張，不會重複放行。
      - 回滾也失敗 → 記進摘要並併入那一則 @。
 
 **6. 最後在 issue 留言記錄放行**（label 都換好才留言，紀錄才不會寫到沒發生
@@ -366,7 +413,7 @@ gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
 
 已貼上 ready-for-agent、移除 <grill-me-done 或 agent-failed>。
 
-來源：<段 1：本輪排序第 N 順位／段 2：修正規格後放行重做，修正內容見「## Summer 已修正規格」留言>
+來源：<段 1：本輪排序第 N 順位／段 2：修正規格後放行重做，修正已寫進 issue body，紀錄見「## Summer 已修正規格」留言>
 
 放行前檢查：
 - needs-human 五類：不落在任何一類（<一句話理由>）
@@ -431,7 +478,11 @@ comment 只含背景、需求範圍、驗收條件、目標 repo，**不含數�
 不准用推測冒充數據依據**——GA4 查詢失敗，或這張 issue 的 body 本來就沒留下
 數據依據，理由就寫「這部分無法查證」。
 
-**排序結果要留在 GitHub**：對本輪排序的每一張 issue，各貼一則：
+**排序結果要留在 GitHub，但名次沒變就不重貼**：對本輪排序的每一張 issue，
+先找它身上 `wman-pm` 最後一則第一行為 `## 排序結果` 的留言，看裡面寫的
+「第 N 順位」：
+
+- 沒有這種留言（第一次排到），或名次和這次不同 → 貼一則新的：
 
 ```bash
 gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
@@ -447,10 +498,14 @@ EOF
 )"
 ```
 
-**依序放行**：照排序由第 1 順位往下，對每一張依序做：
+- 名次和上一則相同 → **不重貼**，只在 Discord 摘要提一句「#N 維持第 K 順位」。
+  WIP 滿的時候，同一批單每個平日都會被重排一次，名次沒變還每天各貼一則，只會
+  把 issue 洗成一串一模一樣的留言。
 
-1. **WIP ≥ 2（或查詢失敗）→ 結束段 1 的放行**，這張與後面的單留到下一輪
-   （排序留言已經貼了，不用再補）。
+**依序檢查與放行**：照排序由第 1 順位往下，**每一張都要看完**，依序做：
+
+1. 帶 `needs-human` → 跳過（過濾時已排除；這裡再確認一次，因為升級可能是這一輪
+   前面的步驟剛貼上的）。
 2. **五類檢查（第 1–4 類）**：讀需求共識與 body，這張單要做的事落在第 1–4
    類 → 走「貼 `needs-human` 的固定順序」，不放行，換下一張。過濾時判定為
    「人類明確說可以做」的單，只看新出現的、不同的卡點（見「人類處理過的升級」）。
@@ -458,9 +513,14 @@ EOF
    換下一張（人類明確放行、而且升級之後沒有新重做事件的單除外，見「人類處理過
    的升級」）；`FAILED` → 跳過，換下一張。`grill-me-done` 的單也可能有過失敗
    紀錄（例如人類把失敗的單送回重新 grill），所以這一步不能省。
-4. 都通過 → 走「放行程序」（`SRC`＝`grill-me-done`）。
+4. **WIP**：已經確定本輪不再放行（前面某張遇到 WIP 滿或查詢失敗）→ 這張不放行，
+   **繼續看下一張**。否則走「放行程序」（`SRC`＝`grill-me-done`），程序第 2 步
+   重查 WIP；滿了（或查詢失敗）就不放行這張，並記下「本輪不再放行」，一樣繼續
+   看下一張。
 
-升級的單不佔 WIP，升級完繼續看下一張。
+**WIP 滿只停止放行，不停止檢查**：五類與重做次數的升級和 WIP 無關，WIP 滿了
+也要把整份清單走完。若在 WIP 滿的時候直接結束，落在五類或重做達上限的單就要等
+到有名額才會被發現，人類也就晚好幾天才知道要做決定。升級的單不佔 WIP。
 
 ## 段 2：`agent-failed` → 修規格、算重做次數、放行重做
 
@@ -482,14 +542,21 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
   不重留言、不佔 WIP、不重新檢查。
 - 同時帶 `agent-active` → 不動，交給 poller（poller 有自己的補做規則）。
 
-**2. 人類已經回覆了就交給 poller**：先對這張單跑一次「重做次數」那整段
-（同一次 Bash 呼叫），取得 `last_failed`、`last_active`、`worker_comment`
-與重做次數，步驟 4、7 都用這次的結果（timeline 查詢失敗、`last_failed` 是
-空的就跳過這張）。**最後一則留言的作者是 `wm4n`，
-且時間晚於 `LAST_FAILED_AT`** → 跳過、不動。poller 看到人類在失敗之後回覆，
-會自己把單子叫回原本那隻 bot 續作；Summer 這時再修規格、放行，兩條路會搶
-同一張單。Summer 自己的留言（`wman-pm`）不會觸發 poller，所以 Summer 修完
-規格之後要自己放行（下面步驟 7）。
+**2. 先跑一次「重做次數」那整段，排除 label 狀態不對與歸 poller 的單**：
+對這張單跑一次（同一次 Bash 呼叫），步驟 4、7 都用這次印出的結果。
+
+- `rework=FAILED`（timeline 或留言查詢失敗）→ 跳過，段 3 列出。
+- `label_state=no_failed_event` → 跳過，段 3 列出（原因「timeline 沒有
+  `agent-failed` 事件」）。
+- `label_state=inconsistent` → 跳過，段 3 列出（原因「label 狀態不一致：最後
+  一次認領晚於最後一次 `agent-failed`」）。這通常是之前放行時移除
+  `agent-failed` 失敗、poller 又已經認領過留下的殘留；照常修規格、放行，同一張
+  單就會被放行第二次。
+- `poller_owns=yes` → 跳過，段 3 列出（原因「人類已回覆，交給 poller 接手」）。
+  poller 看到人類在失敗之後回覆，會自己把單子叫回原本那隻 bot 續作；Summer 這時
+  再修規格、放行，兩條路會搶同一張單。`poller_owns=FAILED`／`NOT_CHECKED` 也跳過。
+- 都不是（`label_state=ok` 且 `poller_owns=no`）→ 繼續。Summer 自己的留言
+  （`wman-pm`）不會觸發 poller，所以 Summer 修完規格之後要自己放行（下面步驟 7）。
 
 **3. 有升級留言、沒有 `needs-human`** → 照「人類處理過的升級」判斷；它說
 跳過就跳過。
@@ -528,9 +595,10 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
     gh issue edit "$NUM" --repo "$REPO" --body "$UPDATED_BODY"
     ```
 
-  - **作者不是 `wman-pm`**（人類開、Summer 收養的單）→ **不改 body**，把修正
-    後的完整段落寫進下面那則留言。人類寫的 body 不由 bot 覆寫，與
-    `product-planning` 收養時「不改人類開的 issue 的 body」同一條規則。
+  - **作者不是 `wman-pm`**（人類開、Summer 收養的單）→ **人類寫的原文一個字
+    都不改**，在 body **最後面附加**一段 `## Summer 規格修正（YYYY-MM-DD）`，
+    寫修正後的需求與驗收條件。修正一定要進 body：Rick/Morty 的開發流程讀的是
+    issue body，不保證會讀留言，只寫在留言裡等於沒修。做法見下面「附加修正段」。
 
   修完立刻貼一則記錄變更的留言（第一行逐字照抄，步驟 5 靠它判斷修過了沒）：
 
@@ -540,15 +608,48 @@ gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
 
 依 Rick/Morty 的規格問題（<留言連結>）調整規格。
 
-變更摘要：<改了哪個段落，新增／刪除了什麼內容>
-
-<作者不是 wman-pm 時：修正後的完整段落，取代 body 中的對應段落>
+變更摘要：<改了哪個段落，新增／刪除了什麼內容；作者不是 wman-pm 時寫「已在 body 末尾附加『## Summer 規格修正（YYYY-MM-DD）』」並摘要內容>
 
 ---
 — By Summer
 EOF
 )"
 ```
+
+**附加修正段**（只用於作者不是 `wman-pm` 的單）：先讀回目前的 body，讀取失敗
+就停手——拿空字串去 `--body` 會把人類的原文整段清掉：
+
+```bash
+if CUR_BODY=$(gh issue view "$NUM" --repo "$REPO" --json body --jq '.body'); then
+APPEND=$(cat <<'EOF'
+## Summer 規格修正（YYYY-MM-DD）
+
+依 Rick/Morty 指出的規格問題補充。上方人類原文保留不動；兩者衝突時，以本段為準。
+
+### 修正後的需求
+
+<修正後的需求描述>
+
+### 修正後的驗收條件
+
+- <條件一>
+- <條件二>
+EOF
+)
+  gh issue edit "$NUM" --repo "$REPO" --body "$(printf '%s\n\n%s\n' "$CUR_BODY" "$APPEND")"
+else
+  echo "讀取 body 失敗，本輪不修這張"
+fi
+```
+
+- `YYYY-MM-DD` 換成今天的日期。之前已經附加過修正段（上一次失敗修的）就不動
+  它，在最後面再附加一段新日期的；最新一段為準。
+- 附加段**不寫 `— By Summer` 簽名**：body 裡出現這串字，`summer-grill-responder`
+  會把這張人類的單誤認成 Summer 開的單（與 `product-planning` 收養時「不在人類
+  的 body 補簽名」同一個理由）。標題已經寫明是 Summer 的修正，紀錄與簽名放在
+  `## Summer 已修正規格` 留言裡。
+- 改完用 `gh issue view "$NUM" --repo "$REPO" --json body` 確認人類原文還在、
+  附加段在最後面；不對就記進摘要，不放行。
 
 `gh issue edit --body` 是整段覆蓋，不留紀錄的話事後沒有人分得出「這是誰、
 什麼時候、為什麼改的」。變更摘要要點名**改了哪個段落、新增或刪除了什麼
@@ -558,8 +659,9 @@ EOF
 
 - ≥ 2 → 升級第 5 類，不放行。
 - `FAILED` → 跳過，下一輪重算。
-- < 2 → 走「放行程序」（`SRC`＝`agent-failed`）。WIP 已滿就留著，下一輪從
-  步驟 5 接著做。poller 重新認領時會優先送回之前做過這張的 bot，這裡不用處理。
+- < 2 → 走「放行程序」（`SRC`＝`agent-failed`；程序第 1 步會重跑「重做次數」
+  那整段，確認人類這段時間沒有回覆）。WIP 已滿就留著，下一輪從步驟 5 接著做。
+  poller 重新認領時會優先送回之前做過這張的 bot，這裡不用處理。
 
 ## 段 3：列出 poller 已升級與等人類決定的單
 
@@ -583,13 +685,17 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 
 在 Discord 摘要裡列兩份清單：
 
-1. **`agent-failed` 而且最後一則留言不是人類（`wm4n`）在失敗之後的回覆的單**
-   ——沒有人在推它往前，需要人類知道。每張附一句原因（段 2 已經判斷過）：
-   「poller 叫不醒 bot，已 @ 過人類」「WIP 已滿，規格已修，等下一輪放行」
-   「人類已處理升級但沒有回覆」「找不到認領紀錄，無法判斷是否規格問題」
-   「重做次數查詢失敗」等。最後一則留言是 `wm4n`、
-   而且晚於最後一次 `labeled agent-failed` 的不列：段 2 的步驟 2 已經交給 poller
-   續作。帶 `needs-human` 的不列在這裡，列在第 2 份。
+1. **段 1、段 2 做完之後仍是 `agent-failed` 的每一張**（帶 `needs-human` 的
+   不列在這裡，列在第 2 份），每張附一句原因，沿用段 2 的判斷：
+   - 「人類已回覆，交給 poller 接手」（`poller_owns=yes`）——列出來讓人知道
+     這張不是沒人管，而是 poller 下一次執行就會續作；
+   - 「poller 叫不醒 bot，已 @ 過人類」（`worker_comment` 空白）；
+   - 「label 狀態不一致：最後一次認領晚於最後一次 `agent-failed`」；
+   - 「timeline 沒有 `agent-failed` 事件」；
+   - 「找不到認領紀錄，無法判斷是否規格問題」；
+   - 「WIP 已滿，規格已修，等下一輪放行」；
+   - 「人類已處理升級但沒有回覆」；
+   - 「重做次數或留言查詢失敗」。
 2. **帶 `needs-human` 的 open 單**——提醒還有哪些在等人類決定。**只放在摘要，
    不再 @**：這些單升級當時已經 @ 過，每輪重 @ 只會讓人學會忽略通知。
 
@@ -639,7 +745,9 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
   留言卻沒有 label，是人類處理完移除的，**絕不重新加回**；只有之後出現新的
   重做事件，才為那個新事件重新升級。
 - **帶 `needs-human` 的 issue 一律不動**，只列進段 3 的提醒。
-- **人類在 `agent-failed` 的單上回覆了，就交給 poller**，Summer 不修、不放行。
+- **`agent-failed` 的單歸 poller 時（`poller_owns=yes`），Summer 不修、不放行**；
+  判斷規則照 poller 的 `failed_pending`，不自己另訂。label 狀態不一致
+  （`label_state` 不是 `ok`）的單也不修、不放行，只列進段 3。
 - **整輪只 @ 人類一次，且只在 `bot-notify`**。
 - **排序只依產品價值與數據**，不做顆粒度拆解、不做技術可行性把關——那是
   實際執行開發的 Rick/Morty 的職責。WIP 上限是固定的費用防線，不是排序因素：
@@ -653,8 +761,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 - **不 approve、不 merge 任何 PR**——本 skill 完全不碰 PR，那是
   `acceptance-review` 掃 `agent-done` 之後的事。
 - **不建 worktree、不切分支、不改程式碼**——只讀 issue、留言與 timeline，
-  改 Summer 自己開的 issue 的描述文字，貼 issue 留言與 Discord 訊息，以及放行與
-  升級的 label 操作。
+  改 Summer 自己開的 issue 的描述文字、在人類開的 issue body 末尾附加修正段，
+  貼 issue 留言與 Discord 訊息，以及放行與升級的 label 操作。
 - **不碰 `agent-active` 的單**：開發中的單、卡單的重送與升級都是 poller 的事。
 - **掃全部時不碰 `ready-for-human` 的單**：那是 `product-planning` 的範圍（段 4）。
 - **不用 `gh label create` 建 label**。
@@ -673,8 +781,9 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 - **放行時移除 `agent-failed` 失敗**：poller 每 10 分鐘認領一次，所以單子
   很容易變成 `agent-active`＋`agent-failed`，poller 會把它當成自己轉換到一半而
   移除 `agent-active`。本 skill 的對策是當場重試一次，還沒被認領就回滾
-  `ready-for-agent`（見放行程序步驟 5）；已經被認領的話只能 @ 人類手動移除
-  `agent-failed`。只有步驟 5 連續失敗才會走到這裡。
+  `ready-for-agent`（見放行程序步驟 5）；已經被認領的話只能 @ 人類確認最後
+  只留 `agent-active`，並靠 `label_state=inconsistent` 防止段 2 再放行一次。
+  只有步驟 5 連續失敗才會走到這裡。
 - **升級在「@ 之後、留言之前」被中斷**：人類已被通知、`needs-human` 已在
   身上，poller 都會跳過，只是 issue 上缺說明留言；這是接受的取捨，不補做。
   若人類之後只移除 label、沒有留言，這張單沒有升級留言可供辨認，可能再被升級
