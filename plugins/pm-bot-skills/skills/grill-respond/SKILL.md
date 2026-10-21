@@ -6,11 +6,14 @@ description: >-
   規劃中的 summer-grill-responder（Mac cron，不含 LLM；腳本已寫好，cron
   尚未掛上，見「已知限制」）偵測到 issue 最後一則留言帶 (jira-grill) 簽名
   時，用專屬 Discord 訊息觸發（不是人類 @mention）：讀完整 issue 與留言，
-  逐題回答最新一輪規格類問題，需要人類商業判斷的明說「這題要人類決定」
-  並 @ issue author、不硬掰，貼一則以 — By Summer (grill-respond) 結尾的
-  回覆——這串簽名是 grill-poller.sh 判斷「該不該換 Rick/Morty 問下一輪」
-  的唯一依據，絕不能用 jira-grill 的 (jira-grill) 簽名收尾。不改 label、
-  不開發、不碰程式碼、不開 PR。
+  逐題回答最新一輪規格類問題，不硬掰；答不出來的先對照 persona §2a：不屬於
+  needs-human 五類的產品問題由 Summer 以 PM 身分決定並寫明理由、不 @ 人；
+  屬於五類的先貼 needs-human label，回覆第一行寫「## 需要人類決定（needs-human）」，
+  由主機端 human-notifier 通知人類，本 skill 不 @ 任何人。貼一則以
+  — By Summer (grill-respond) 結尾的回覆——這串簽名是 grill-poller.sh 判斷
+  「該不該換 Rick/Morty 問下一輪」的唯一依據，絕不能用 jira-grill 的
+  (jira-grill) 簽名收尾。除了 needs-human 不改 label，不開發、不碰程式碼、
+  不開 PR。
 ---
 
 # Grill Respond
@@ -100,11 +103,36 @@ NUM="${ISSUE_REF##*#}"           # → 42
    單設計上只問規格類問題，見設計文件「簽名協定 > 怎麼認出這是 Summer
    開的單」一節引用的決策 #5——決策 #5 本身列在文件開頭的「設計決策」表）。
 
-   **答不出來的處理**：凡是需要人類做商業決定的題目（例如砍不砍某個範圍、
-   要不要多花預算、上線時間怎麼取捨）——**明說「這題要人類決定」，
-   `@` 該 issue 的 author（`gh issue view` 讀到的 `author.login`，真正
-   會觸發 GitHub 通知），不硬掰答案**。硬掰一個聽起來合理但沒有依據的
-   答案，比誠實承認「不知道」更糟：對方會照著錯的答案往下做。
+   **答不出來、看起來要人決定的題目，先對照 persona `Summer-AGENTS_v2.md`
+   §2a 的 `needs-human` 五類**（費用／權限與秘密／對外發布或不可逆／產品方向
+   翻轉／自動重做達上限；定義以 persona 為準）：
+
+   - **不屬於五類的產品問題**（範圍取捨、優先序、上線順序、文案、互動細節…）
+     → Summer 以 PM 身分**自己決定**，在那題的回答裡寫明決定與理由，用 `💬`，
+     **不 @ 任何人**。這些本來就是 PM 的職責，丟給人類等於讓整條自主閉環
+     重新卡在人身上。
+   - **屬於五類的** → 走 needs-human，順序固定、不可換：
+     1. **先加 label**：`gh issue edit "$NUM" --repo "$REPO" --add-label needs-human`。
+        **失敗就停**：什麼都不貼，印出明確包含 issue 編號與 `gh` 原始錯誤的
+        `ERROR: 加 needs-human 失敗 issue=${REPO}#${NUM}` 後結束。理由同步驟 7：
+        `summer-grill-responder` 不會重試，安靜結束等於整條 grill 默默停住。
+     2. **再貼回覆**：這一輪的回覆**第一行**逐字寫 `## 需要人類決定（needs-human）`
+        （從第一欄開始、不加前綴），接一句說明卡在五類的第幾類、要人類決定什麼、
+        有哪些選項，然後照常逐題作答（屬於五類的那題用 `🙋`，見下方格式），
+        結尾仍是 `— By Summer (grill-respond)`。同一則留言同時滿足兩邊：第一行讓
+        human-notifier 附上說明連結，結尾簽名讓 grill-poller 認得 Summer 回過了。
+     3. **不要自己 @ 人類**：主機端 `human-notifier.sh` 看到 `labeled needs-human`
+        事件就會在 `bot-notify` @ 人類一次。`grill-poller` 會跳過帶這個 label 的單，
+        人類回覆並移除 label 後 grill 才繼續。
+
+   不論哪一種，都**不硬掰答案**：硬掰一個聽起來合理但沒有依據的答案，比誠實
+   承認「不知道」更糟，對方會照著錯的答案往下做。PM 自己決定的題目要寫得出
+   理由，寫不出理由就是需要更多資訊——在回答裡明說缺什麼，不要裝作有依據。
+
+   （🕘 2026-10-18 改：原文是「凡是需要人類做商業決定的題目，明說『這題要人類
+   決定』並 `@` 該 issue 的 author」。自主閉環上線後（2026-10-17，persona §2a、
+   Ruling R7／R15／R17）只有五類找人，其餘產品問題由 Summer 決定；而且 @ 一律由
+   主機端 `human-notifier.sh` 發，skill 不 @。本段改成與 persona §4a 一致。）
 
 7. **組回覆並貼出**：格式與簽名見下方「回覆格式與簽名協定」，最後執行：
 
@@ -135,13 +163,19 @@ NUM="${ISSUE_REF##*#}"           # → 42
 💬 <Summer 的回答>
 ```
 
-答不出來、需要人類決定的題目用 `🙋` 取代 `💬`：
+屬於 `needs-human` 五類、要人類決定的題目用 `🙋` 取代 `💬`，**不帶任何 @**
+（通知由 human-notifier 依 label 發）：
 
 ```
 ❓ **Q1** - **<原問題標題>**
 
-🙋 這題要人類決定 — @<issue author 的 login>
+🙋 這題要人類決定（needs-human 第 <N> 類：<類名>）：<要決定什麼、有哪些選項>
 ```
+
+這一輪有任何一題用了 `🙋`，整則回覆的第一行就必須是
+`## 需要人類決定（needs-human）`，而且 label 要先加好（見步驟 6）；沒有 `🙋`
+的回覆不寫這一行。不屬於五類、由 Summer 決定的題目用一般的 `💬`，在回答裡寫明
+決定與理由。
 
 多題就重複這組區塊，全部答完後，結尾固定收在同一行：
 
@@ -164,7 +198,10 @@ NUM="${ISSUE_REF##*#}"           # → 42
 
 - **不改任何 label**（`grill-me-active` → `grill-me-done` 的轉換歸
   `jira-grill` 那側，看到規格 frontier 清空是它的判斷，不是這支 skill
-  的責任）。
+  的責任）。**唯一例外**是步驟 6 屬於五類時加 `needs-human`；`needs-human`
+  只由人類移除，這支 skill 絕不移除。
+- **不在 GitHub 或 Discord @ 任何人**：要人類處理的事由主機端
+  `human-notifier.sh` 通知（2026-10-18 改，見步驟 6 的歷史註記）。
 - **不開發、不碰程式碼、不開 PR**——這支 skill 只回答問題，不做任何
   工程動作。
 - **不主動起新的問題或幫忙補問題**——只回答步驟 5 找到的那一輪，其餘一律

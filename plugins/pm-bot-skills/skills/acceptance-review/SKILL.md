@@ -2,54 +2,62 @@
 name: acceptance-review
 argument-hint: "[<owner/repo>#<N>]"
 description: >-
-  掃描 agent-done issue 對應的 PR，逐條核對是否滿足當初的驗收條件（規格
-  符合度，不是程式碼品質）。由規劃中的 usercron 平日 10:30 觸發（訊息
-  「執行 acceptance-review skill」，sender_name＝SummerAcceptance；
-  cronjob.toml 尚未寫入，見「已知限制」），或人類在 Discord 提出同類請求
-  （如「驗收一下」「這張 PR 符合需求嗎」「看看 agent-done 的單」）時觸發：
-  agent-done 代表 Rick/Morty 走完 solo-feature-pipeline（經 persona §4b
-  自動觸發、跳過確認閘門）開完 PR、自我審查通過的狀態——這條標籤鏈已由
-  persona §4b（2026-09-20 補上，尚未實機驗證）補齊，本 skill 仍把「掃到
-  0 張」與「找不到對應 PR」都設計成看得見、不跟正常的冪等跳過混在一起
-  （見「已知限制」），因為鏈補上之後有沒有被確實遵守，還沒有實機資料
-  可以確認。先查 PR 上有沒有已帶
-  — By Summer (acceptance-review) 簽名的留言，有就跳過（冪等，不新增
-  label）；沒有才以留言串裡「✅ 需求共識」comment 為基準取得驗收條件，
-  讀 PR 的 diff、描述逐條標示滿足／不滿足／無法判斷，貼在 PR 上並附
-  相同簽名，Discord 分類貼精簡結論摘要。只看規格符合度，
-  不做 code review；不滿足時只提議、不自行改 label；永不 approve、
-  永不 merge。
+  驗收 agent-done issue 對應的 PR：逐條核對驗收條件，並在 PR head 的乾淨
+  checkout 自己跑 base branch 的 CLAUDE.md 規定的測試（Flutter 至少 flutter
+  analyze、flutter test；環境跑不起來算無法驗證、絕不當通過）。由 usercron 觸發（訊息「執行
+  acceptance-review skill」，sender_name＝SummerAcceptance，時程
+  30 9-21 * * *，以 CRONJOB.md 為準），或人類在 Discord 提出同類請求（如
+  「驗收一下」「這張 PR 符合需求嗎」）時觸發。驗收基準三層：「✅ 需求
+  共識」→ issue body 驗收條件段、Summer 規格修正段與 wm4n 留言（標「基準
+  較弱」）→ 都沒有就貼 needs-human 找人決定基準，只報一次。通過 → 在 PR
+  貼「驗收結果：通過（待人類 merge）」（head SHA、逐條依據、測試指令與輸出
+  結尾），issue 貼一行連結，由主機端 human-notifier 通知人類 merge。測試失敗
+  先對 base branch 跑同一組指令：base 也紅歸「無法驗證（基線紅）」，不算重做。
+  不通過、有衝突或 base 綠 head 紅 → 先算重做次數，未達 2 次用綁 head SHA 的
+  Request changes 送回 bot 作者（由主機端 pr-review-poller 觸發作者）；達 2 次
+  改貼 needs-human、不送回；作者不是 bot 帳號只留言、不送回，由主機端
+  human-notifier 通知人類處理。本 skill 不在 Discord @ 任何人。同一個 head SHA
+  只驗一次；送回做到一半會續做，作者回應了卻沒推新 commit 就留停滯通報（每個
+  SHA 最多 2 次）。永不 approve、永不 merge（自動 merge 暫緩，
+  等人類決定是否開放）。帶 needs-human 的單一律不動，不改任何 label。
 ---
 
 # Acceptance Review
 
-> **本 skill 是責任鏈收尾前的最後一道檢查，不是最後一道閘門**：
-> `agent-done` 代表 Rick/Morty 透過 `solo-feature-pipeline`（經 persona
-> `Rick-CLAUDE_v2.md` §4b 自動觸發、跳過確認閘門）自己審過一輪程式碼
-> （TDD、獨立 subagent code review）並開好 PR，本 skill 要回答的是
-> 另一個維度的問題——**當初在 issue 上定案的需求，PR 真的做到了嗎**。
-> 兩個維度刻意分開：code review 已經有人做過，這裡重做一次只會製造
-> 角色衝突，也讓「規格對不對」這個真正還沒人看過的問題被稀釋掉。
-> 唯一的人類閘門仍在 merge 這一步——本 skill 只提供判斷依據，
-> **永不 approve、永不 merge**：這既是角色分工的設計決定，也是現實
-> 限制——Summer 與 PR 作者目前共用同一個 wm4n GitHub 帳號，GitHub 本來
-> 就不允許帳號 approve 自己開的 PR（見
-> [wm4n/openab-ops#3](https://github.com/wm4n/openab-ops/issues/3)）。
+> **本 skill 是 Rick/Morty 開完 PR 之後的收尾**：`agent-done` 代表 Rick/Morty
+> 走完 `solo-feature-pipeline`、開好 PR、自我審查通過。本 skill 回答兩個
+> 問題：**當初定案的需求，PR 真的做到了嗎**，以及**該 repo 規定的測試在 PR
+> head 上真的全綠嗎**。第二個問題由 Summer 自己跑：chainbreak 沒有 CI，這是
+> merge 前唯一的客觀證據，不能只信作者自稱「已自審」。
 >
-> ⚠️ **`agent-done` 這條標籤鏈已經補上，但尚未實機驗證**：persona
-> `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b（2026-09-20 新增）現在
-> 明確要求成功路徑收尾三件事——PR 描述寫 `Closes #<issue 編號>`、在
-> issue 貼含 PR 連結的收尾留言、先加 `agent-done` 再移除
-> `agent-active`；舊版本只在**失敗**路徑提到 label（改成
-> `agent-failed`），成功路徑那時完全沒有對應步驟，這次補的就是那個
-> 缺口。但這段要求本身還沒有實機跑過（Rick/Morty 真的照做了嗎、label
-> 順序有沒有貼對），下方每一步仍刻意把「掃不到東西」設計成看得見、不
-> 會安靜空轉
-> （見「流程」步驟 0 與「已知限制」）——**掃到 0 張不再預設是正常
-> 狀態**：這段期間沒有 PR 走完是一種解釋，但補齊後的鏈沒有被確實
-> 遵守（例如漏貼 `agent-done`）也會長成一模一樣的「0 張」，連續多輪
-> 是 0 而 backlog 明顯有在動，就是該懷疑鏈又斷掉的訊號，不能再當成
-> 已知的正常狀態略過。
+> ⏸️ **自動 approve＋merge 暫緩，等人類決定是否開放**（2026-10-17）：讓 bot
+> 不經人工 review 就 merge 到 main，是整套自主閉環裡風險最高、最難回收的
+> 一步，自動模式的安全分類器也以「Merge Without Review」擋下。所以這一版：
+>
+> - 通過 → 在 PR 貼驗收通過的結果（head SHA、逐條依據、測試指令與輸出），
+>   **merge 留給人類**。人類只需確認那則結果、按一下 merge，不用再自己驗收。
+> - 不通過 → 用 Request changes 送回原作者（這不是 approve，可以做），受
+>   重做上限約束。
+>
+> **永不 approve、永不 merge**：本文件裡沒有任何 approve 或 merge 的指令，
+> 也不要自己補上。
+>
+> 📡 **Discord 的觸發與 @人類 都不是本 skill 發的**（Ruling R17，2026-10-17）：
+> 本 skill 由 usercron 在 `summer-pm` 的 thread 裡跑，輸出只回得到那個 thread，
+> Rick／Morty 也收不到那裡的訊息。所以本 skill **只在 GitHub 上留痕**——送
+> Request changes review、貼固定標題的留言、加 `needs-human` label——由 Mac mini
+> 主機端的兩支 poller 讀 GitHub 之後發到 `bot-notify`：
+>
+> - `pr-review-poller.sh`：看到 PR 上有還沒回應的 `wman-pm`（或 `wm4n`）Request
+>   changes，就觸發作者跑 `pr-review-response`。
+> - `human-notifier.sh`：`needs-human` 被加上、或 PR／issue 上出現 `wman-pm` 貼的
+>   `## 驗收結果：通過（待人類 merge）`、`## 驗收結果：無法驗證（測試環境）`、
+>   `## 驗收結果：無法驗證（基線紅）`、`## 驗收停滯：PR head 未更新`、
+>   `## 驗收紀錄補記失敗`、`## 驗收結果：不通過（作者非 bot，待人類處理）`，就 @ 人類
+>   一次（一般的 `## 驗收結果：不通過` 不通知）。
+>
+> 所以那幾個標題的第一行一個字都不能改，改了人類就收不到通知。本 skill 在
+> Discord 只回本輪摘要（不帶任何 @）。
 
 ## 觸發與參數
 
@@ -57,66 +65,288 @@ description: >-
 
 - 空 → **掃全部**：對 `wm4n/chainbreak`、`wm4n/hangman` 兩個白名單 repo，
   各自列出所有帶 `agent-done` label 的 open issue。
-- `<owner/repo>#<N>` → **只處理這一張**。若它目前沒有 `agent-done`
-  label，說明「這張不在 agent-done 狀態」並停止，不要臆測要不要繼續看。
+- `<owner/repo>#<N>` → **只處理這一張**。它目前沒有 `agent-done` label →
+  說明「這張不在 agent-done 狀態」並停止，不要臆測要不要繼續看。
 
 ```bash
-gh issue list --repo wm4n/chainbreak --label agent-done --state open \
-  --json number,title,body,comments
-gh issue list --repo wm4n/hangman    --label agent-done --state open \
-  --json number,title,body,comments
+gh issue list --repo wm4n/chainbreak --label agent-done --state open --limit 200 \
+  --json number,title,body,labels,author,comments
+gh issue list --repo wm4n/hangman    --label agent-done --state open --limit 200 \
+  --json number,title,body,labels,author,comments
 ```
+
+排程是 usercron `30 9-21 * * *`（每天 09:30–21:30 每小時一次，時程以 `openab-ops` 的
+`CRONJOB.md` 為準）。一天跑 13 次，所以**同一個 head SHA 只驗一次**（見
+步驟 3 的 R4），Discord 也只報有變化的事（見「Discord」）。
 
 ### ⚠️ 先把參數拆開：`gh` 不吃 `owner/repo#N`
 
-`gh issue`／`gh pr` 各子指令只接受 `{<number> | <url>}`，指定單張時先拆
-成兩個變數，repo 用 `--repo` 旗標指定：
+`gh issue`／`gh pr` 各子指令只接受 `{<number> | <url>}`，先拆成變數，repo
+用 `--repo` 旗標指定：
 
 ```bash
 ISSUE_REF="wm4n/chainbreak#42"   # 從 $ARGUMENTS 取得
 REPO="${ISSUE_REF%#*}"           # → wm4n/chainbreak
 NUM="${ISSUE_REF##*#}"           # → 42
+OWNER="${REPO%%/*}"              # → wm4n
+REPO_NAME="${REPO#*/}"           # → chainbreak
 ```
 
-下面所有指令都用這組 `$REPO` / `$NUM`。
+掃全部時，下面所有指令裡的 `REPO`、`NUM`、`OWNER`、`REPO_NAME` 換成當下處理
+的那張單；`PR_NUM` 是步驟 2 找到的 PR 編號。
 
-## 流程
+### 狀態檔：跨 Bash 呼叫的值一律存檔、現讀
 
-### 0. 定範圍，「零筆」與三類結果的分類
-
-先依「觸發與參數」的查詢列出範圍內所有 `agent-done` issue，記下這輪的
-張數 `$TOTAL`：
-
-- **掃全部時 `$TOTAL` = 0**（兩個白名單 repo 都沒有任何 `agent-done`
-  issue）→ **不要就這樣結束**。這代表兩種可能：(a) 這段期間真的沒有
-  PR 完成到可以驗收的狀態，是正常的；(b) `agent-done` 這條標籤鏈雖然
-  已經由 persona §4b 補上（見文首 ⚠️ 說明），但沒有被確實遵守或又
-  鬆脫了，Rick/Morty 完成的 PR 根本沒被貼上這個 label，本 skill 永遠
-  看不到。這兩種情況在 Discord 上看起來會一模一樣（都是「沒有要驗收
-  的」），所以**每次掃全部都要明確發一則 Discord 訊息**講出「本輪
-  掃描 agent-done：0 張」，不要默默什麼都不做——連續多輪都是 0 張、
-  而 backlog（`grill-me-done`／`ready-for-agent`／`agent-active`）
-  明顯有在動，就是提醒人類去確認標籤鏈是否正常運作的訊號。
-- `$TOTAL` > 0 → 對每一張依序做完下面步驟 1–5。每一張的結果最終只
-  會落在三類之一，這三類在 Discord 摘要裡**分開列，不合併成一句籠統
-  的「跳過 N 張」**（模板見「Discord 摘要模板」）：
-  1. **本輪驗收完成**：走完步驟 1–5，貼出逐條對照表。
-  2. **跳過（正常冪等）**：步驟 2 判定已經驗收過。
-  3. **異常（需要人類關注）**：步驟 1 的 GraphQL 查詢本身報錯、步驟 1
-     找不到對應 PR，或步驟 3 找不到驗收條件來源。這不是正常跳過，是
-     需要人看見的訊號，尤其在標籤鏈補齊後尚未實機驗證的現階段，
-     「異常」的張數本身就是判斷鏈有沒有正常運作的觀察指標。
-
-### 1. 找出對應 PR——優先用 GraphQL 原生關聯，留言比對是 fallback
-
-Rick/Morty 開 PR 時，persona `Rick-CLAUDE_v2.md` §4b（2026-09-20 才
-補上，**尚未實機驗證**）要求 PR 描述要寫 `Closes #<issue 編號>`，
-GitHub 會據此建立 issue↔PR 的原生關聯，直接查詢就好，不必先靠比對
-留言文字：
+一張單的處理會跨很多次 Bash 呼叫，shell 變數不保證留得住，殘留上一張單的值
+更危險（SHA 對錯 PR，驗收結果就貼到錯的 commit 上）。每張單開始時開一個狀態
+目錄，head SHA、測試 log 都寫進去，要用時從檔案讀：
 
 ```bash
-OWNER="${REPO%%/*}"
-REPO_NAME="${REPO#*/}"
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+/bin/rm -rf "$STATE"; mkdir -p "$STATE"
+```
+
+之後每次 Bash 呼叫開頭都重新設定 `STATE`（同一個算式）。**SHA 一律由指令寫入、
+由指令讀出**（`$(cat "$STATE/head_sha")`），不要自己抄寫 40 個字元進留言——
+抄錯一個字元，冪等就會失準。
+
+## 帳號、固定 ID 與固定標題
+
+- 人類是 `wm4n`；bot 帳號是 `wman-dev`（Rick）、`wman-review`（Morty）、
+  `wman-pm`（Summer）。
+- Discord：本 skill **不 @ 任何人**（人類、Rick、Morty 都不 @）。觸發作者與
+  通知人類都由主機端 poller 發到 `bot-notify`（見文件開頭的 📡）。
+- 簽名一律逐字 `— By Summer (acceptance-review)`（開頭是 em dash U+2014
+  「—」，不是連字號「-」）。直接複製本文件裡的字串，不要自己重打。
+
+本 skill 靠下面幾個固定標題辨認留言，一律用「**留言內容的第一行，去掉前後
+空白後，以這串完全相同的字串開頭**」判斷，並且只認作者是 `wman-pm` 的留言
+（「✅ 需求共識」除外，見步驟 4）。寫這幾種留言時第一行必須逐字照抄、不可
+改字或加前綴：
+
+| 第一行 | 貼在哪 | 拿來做什麼 |
+| --- | --- | --- |
+| `## 驗收結果：通過（待人類 merge）` | PR | 冪等（記下驗過的 SHA）；**human-notifier 據此 @ 人類 merge** |
+| `## 驗收結果：不通過` | issue | 冪等；**`backlog-triage` 靠它算重做次數**；送回給 bot 作者的紀錄，不通知人類 |
+| `## 驗收結果：不通過（作者非 bot，待人類處理）` | issue | PR 作者不是 bot 帳號時用這一行取代上一行（2026-10-17 fix round 1）：不送回、要人類處理；**human-notifier 通知**。它以 `## 驗收結果：不通過` 開頭，重做次數與冪等照樣算到 |
+| `## 驗收結果：無法驗證（測試環境）` | PR | 冪等；Summer 環境跑不起來，不算重做；human-notifier 通知 |
+| `## 驗收結果：無法驗證（基線紅）` | PR | 冪等；base branch 自己就紅（R18），不算重做；human-notifier 通知 |
+| `## 需要人類決定（needs-human）` | issue | 升級紀錄（R15，見下）；第二行區分兩種升級。通知靠 label 事件，不靠這則 |
+| `## 驗收停滯：PR head 未更新` | PR | 通報停滯（原因寫在內文）；每個 SHA 最多 2 則，去重規則見步驟 3；human-notifier 通知 |
+| `## 驗收紀錄補記失敗` | PR | 8d 補記不通過紀錄失敗時通報人類；每個 SHA 只報一次；human-notifier 通知 |
+
+`## 驗收結果：不通過` 這串字一個字元都不能改：`backlog-triage` 算重做次數時
+就是用它比對（第一行以它開頭），改了就會少算，自動送回的迴圈就失去上限。
+`## 驗收結果：不通過（作者非 bot，待人類處理）` 刻意以同一串開頭，所以作者非 bot 的那則也算一次重做、也是這個 SHA 的冪等
+紀錄；只有它會被 human-notifier 通知，一般的不通過不會。標了「human-notifier
+通知」的幾行也一樣：主機端 `human-notifier.sh` 只認作者 `wman-pm`、第一行以這幾串
+開頭的留言，改了人類就收不到通知。舊版本貼過只有
+`## 驗收結果` 的 PR 留言（沒有冒號後綴、沒有 SHA），**不符合上表任何一行，
+視為「還沒驗過」**。
+
+每則通過／不通過／無法驗證／停滯留言、以及第 5 類的 needs-human 留言，都要有
+一行 `head SHA：<40 碼小寫 16 進位>`（全形冒號），冪等靠它。驗收基準那種
+needs-human 留言**絕不能有這一行**（原因見步驟 3）。
+
+## 什麼時候找人：`needs-human`
+
+**要不要找人，唯一標準是 persona `Summer-AGENTS_v2.md` 的 `needs-human`
+清單**，本 skill 不自創判準。五類的短標題（定義以 persona 為準，兩邊不一致
+時以 persona 為準）：
+
+1. 費用
+2. 權限與秘密
+3. 對外發布或不可逆
+4. 產品方向翻轉
+5. 自動重做達上限
+
+本 skill 會走到的只有兩種：
+
+- **第 5 類**：驗收不通過時，重做次數（含本次）達 `REWORK_MAX = 2`（見
+  「重做次數」）。
+- **找不到驗收基準**（見步驟 4 第三層）：不屬於五類，是設計明文允許的特例
+  ——真的不知道要驗什麼，只能問人。**每張 issue 只報一次。**
+
+### 貼 `needs-human` 的固定順序（順序不可換）
+
+1. **加 `needs-human` label**：
+
+   ```bash
+   gh issue edit "$NUM" --repo "$REPO" --add-label needs-human
+   gh issue view "$NUM" --repo "$REPO" --json labels --jq '[.labels[].name]'
+   ```
+
+   第二行看到 `needs-human` 才算成功。**這一步失敗就停在這裡**：不留言、
+   也不貼 `## 驗收結果：不通過`，什麼都不留下。因為什麼都沒貼，
+   下一輪看到的還是原樣，自然會重試。
+2. **在 issue 上留言**，第一行固定 `## 需要人類決定（needs-human）`，**第二行
+   固定**是下面兩種之一，逐字照抄（之後靠第二行分辨是哪一種升級）。兩種用
+   不同的模板，不要混用。
+3. **不要自己 @ 人類**（2026-10-17 改，Ruling R17：原本第 2 步是「在 `bot-notify`
+   @ 人類一次」，但本 skill 跑在 `summer-pm` 的 thread，@ 送不到 `bot-notify`）。
+   主機端 `human-notifier.sh` 看到 `labeled needs-human` 事件就會 @ 人類一次，
+   並附上這則留言的連結。所以順序是 label → 留言 → poller @。
+
+**第 5 類**（第二行 `原因：自動重做達上限（第 5 類）`，要寫 SHA）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '## 需要人類決定（needs-human）\n原因：自動重做達上限（第 5 類）\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+重做次數：agent-failed <a> 次＋驗收不通過 <b> 次＋本次 1 次，上限 2
+
+本次不通過的項目：
+- <驗收條件 #2：缺了什麼>
+- <`flutter test` exit 1：失敗摘要>
+
+需要人類決定：<要決定的事>
+
+選項：
+- <選項一>
+- <選項二>
+
+處理方式：在本 issue 回覆決定，並移除 needs-human label。
+EOF
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh issue comment "$NUM" --repo "$REPO" --body-file -
+```
+
+**驗收基準**（第二行 `原因：需要人決定驗收基準`，**整則不得出現 `head SHA：`**）：
+
+```bash
+{
+printf '## 需要人類決定（needs-human）\n原因：需要人決定驗收基準\n\n'
+cat <<'EOF'
+不屬 needs-human 五類，是驗收基準的特例：這張 issue 找不到可以拿來驗收的條件。
+
+找過的來源：
+- 「✅ 需求共識」留言：沒有
+- issue body 的 `## 驗收條件`／`## Acceptance criteria`：沒有
+- body 末尾的 Summer 規格修正段：沒有
+- wm4n 指定驗收基準的留言：沒有
+
+需要人類決定：這張 PR（#<PR 編號>）要用什麼條件驗收。
+
+選項：
+- 在本 issue 留言列出驗收條件（第一行寫 `## 指定驗收基準（人類決定）`）
+- 在 issue body 補上 `## 驗收條件` 段
+- 不驗收，由人類自己決定要不要 merge
+
+處理方式：補好基準後移除 needs-human label，下一輪會照新的基準驗收。
+EOF
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh issue comment "$NUM" --repo "$REPO" --body-file -
+```
+
+兩種都用同一個方式確認貼上了（把 `<第二行>` 換成那一則的第二行）：
+
+```bash
+gh api "repos/$REPO/issues/$NUM/comments" --paginate \
+  --jq '.[] | select(.user.login == "wman-pm" and (.body | split("\n") | (.[0] | sub("^\\s+"; "") | sub("\\s+$"; "")) == "## 需要人類決定（needs-human）" and (.[1] // "" | sub("^\\s+"; "") | sub("\\s+$"; "")) == "<第二行>")) | .html_url'
+```
+
+**絕不重新加回 `needs-human`**：issue 上有 Summer 的升級留言、卻沒有
+`needs-human` label，代表人類處理完並移除了它，不是「做到一半」。怎麼接著
+處理：
+
+- **驗收基準那一種**（作者 `wman-pm`、第一行 `## 需要人類決定（needs-human）`、
+  第二行去掉前後空白後**完全等於** `原因：需要人決定驗收基準`）：
+  照步驟 4 重新找基準——人類多半已經補了基準留言或 body 驗收條件段。還是找
+  不到 → 跳過、不再升級（只報一次），摘要列一行「人類已處理升級但仍無驗收
+  基準」。
+- **第 5 類**：升級留言記了當時的 head SHA。PR head 還是同一個 SHA → 冪等
+  跳過，等人類自己處理（要送回、要自己修、要關 PR 都由人決定，本 skill
+  不替人類送回）。PR 有了**新的** SHA → 那是新的一輪，照常驗收；再不通過
+  是新的失敗事件，重做次數一樣 ≥ 2，**照固定順序再升級一次**——這不是加回
+  人類為上一件事移除的 label，而是為新事件升級，上限才不會被一次人類決定
+  永久解除。
+
+`backlog-triage`、`product-planning` 為別的事貼過的升級留言（簽名是
+`— By Summer`、沒有 `head SHA：`）跟本 skill 無關，不影響上面的判斷。
+
+**帶著 `needs-human` 的 issue，本 skill 一律不動**：不驗收、不跑測試、不留言、
+不送回，只在摘要列出。它在等人類，任何自動化介入都可能蓋過人類的決定，或在
+等人時繼續燒額度。
+
+## 每輪開始前的預檢
+
+### 1. GitHub 帳號必須是 `wman-pm`
+
+```bash
+gh api user --jq '.login'
+```
+
+不是 `wman-pm`（或查詢失敗）→ **本輪不做任何寫入**（不留言、不送 review、
+不加 label），只在摘要寫明並請人類處理（摘要不帶 @，見「已知限制」）。冪等與重做
+次數都只認 `wman-pm` 的留言，用別的帳號寫，下一輪就認不出來：同一個 SHA 被
+重驗、重送，重做次數也少算。
+
+### 2. label 預檢
+
+```bash
+gh label list --repo wm4n/chainbreak --limit 200 --json name --jq '.[].name'
+gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
+```
+
+`--limit 200` 不能省：`gh label list` 預設只回 30 個，會把存在的 label 誤判成
+缺漏。要確認的是 `needs-human`。缺 `needs-human`，或 `gh label list` 本身報錯
+→ **那個 repo 本輪只讀不寫**：重做達上限時升級不了，卻照常送回，就會繞過上限，
+所以整個 repo 都不寫。缺的 label 不要自己建（改 repo 設定屬於第 2 類），在本輪
+摘要裡寫明、請人類建立（摘要不帶 @，見「已知限制」）。
+
+（2026-10-17 移除原本的預檢 3「記下本輪的台北時間小時」：它只用來決定「升級做到
+一半」要不要在 09 點那一輪併進 @。@ 人類改由主機端 `human-notifier.sh` 依
+`labeled needs-human` 事件發送（Ruling R17），本 skill 不再需要知道現在幾點。）
+
+## 流程（每張 issue 依序做）
+
+**失敗只影響那一張**：對單一 issue 的任何查詢或寫入失敗，記下來、跳過這張，
+繼續處理其餘的。**任何寫入都要用指令確認真的寫進去**（每一步附的確認指令），
+確認不了就當作失敗、不往下做，記進摘要。
+
+### 1. 先看 issue 本身
+
+- 帶 `needs-human` → 不驗收、不送回、不留言，但先看是不是**升級做到一半**
+  （R15 第 1 步加了 label，之後被中斷，沒有貼出這次的說明留言）。用時間判斷，
+  不用「有沒有升級留言」判斷——issue 上可能留著**上一次**、人類早已處理完的
+  升級留言：
+
+  ```bash
+  LBL_AT=; CMT_AT=; HALF=CHECK_FAILED
+  # wman-pm 最後一次貼 needs-human 的時間，與 wman-pm 最後一則升級留言（任何簽名都算）的時間
+  if RAW=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
+       --jq '.[] | select(.event == "labeled" and .label.name == "needs-human" and .actor.login == "wman-pm") | .created_at') \
+     && LBL_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1) \
+     && RAW=$(gh api "repos/$REPO/issues/$NUM/comments" --paginate \
+       --jq '.[] | select(.user.login == "wman-pm" and (.body | split("\n")[0] | sub("^\\s+"; "") | startswith("## 需要人類決定（needs-human）"))) | .created_at'); then
+    CMT_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+    # label 是 Summer 貼的，而且晚於 Summer 最後一則升級留言（或根本沒有留言）→ 做到一半
+    # ISO 8601 UTC 時間字串可以直接排序比大小（同 backlog-triage 的寫法）
+    if [ -n "$LBL_AT" ] && { [ -z "$CMT_AT" ] || { [ "$LBL_AT" != "$CMT_AT" ] \
+      && [ "$(printf '%s\n%s\n' "$LBL_AT" "$CMT_AT" | sort | tail -n 1)" = "$LBL_AT" ]; }; }; then
+      HALF=yes
+    else
+      HALF=no
+    fi
+  fi
+  echo "half=$HALF label_at=$LBL_AT comment_at=$CMT_AT"
+  ```
+
+  - `half=yes` → 升級做到一半：issue 上缺這次的說明。`human-notifier.sh` 看到
+    label 事件時已經 @ 過人類（訊息會註明「尚無說明留言」），本 skill 不再 @，
+    只在摘要**點名**列出「needs-human 已貼但沒有升級說明」。不補貼說明留言（不知道
+    當初卡在什麼，補了只會亂寫）。
+  - `half=no` → 摘要列出「等人類決定中」。
+  - `half=CHECK_FAILED` → 摘要列出「等人類決定中（升級狀態查詢失敗）」。
+- issue 不是 `OPEN` → 跳過。
+
+### 2. 找出對應 PR——優先用 GraphQL 原生關聯，留言比對是 fallback
+
+Rick/Morty 開 PR 時在描述寫 `Closes #<issue 編號>`，GitHub 會據此建立
+issue↔PR 的原生關聯：
+
+```bash
 if ! GRAPHQL_OUTPUT=$(gh api graphql -f query='
 query($owner:String!, $repo:String!, $issue:Int!) {
   repository(owner:$owner, name:$repo) {
@@ -128,292 +358,982 @@ query($owner:String!, $repo:String!, $issue:Int!) {
   }
 }' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM" 2>&1); then
   echo "ERROR: GraphQL 查詢失敗 issue=${REPO}#${NUM}"
-  echo "$GRAPHQL_OUTPUT"
+fi
+echo "$GRAPHQL_OUTPUT"
+```
+
+- `issue` 一定用 `-F`（`Int!`），用 `-f` 會型別錯誤。`includeClosedPrs:true`
+  讓已關閉的 PR 也回傳，下面才分得出「有 PR 但不是 OPEN」。
+- **查詢本身報錯** → 歸類「異常」，記下原始錯誤，**不要靜默滑進 fallback**：
+  schema 變動、權限問題會被 fallback 吃掉、沒人發現。
+- 剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR。
+- 沒有 node，或沒有一個是 `OPEN` → 走下面的 fallback。
+- 超過一個 `OPEN` → 歸類「異常」，列出所有候選，不要自己猜一個。
+
+**Fallback：留言文字比對**。在 issue `comments`（舊到新）裡找 Rick/Morty
+收尾留言中的 `https://github.com/<owner>/<repo>/pull/<N>` 連結，取**最新**一則，
+並用 `gh pr view` 確認那張 PR 是 `OPEN`。兩條路都落空 → 歸類「異常」，不要
+憑標題湊一個 PR 編號。
+
+### 3. 讀 PR 狀態，決定這一輪要不要驗
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+# 第一行是 head SHA、第二行是 PR 的 base 分支，其餘是 key=value；只用 gh 內建的 --jq，不依賴另外裝 jq
+gh pr view "$PR_NUM" --repo "$REPO" \
+  --json url,state,author,headRefOid,baseRefName,mergeable,mergeStateStatus \
+  --jq '"\(.headRefOid)\n\(.baseRefName)\nurl=\(.url)\nstate=\(.state)\nauthor=\(.author.login)\nmergeable=\(.mergeable)\nmergeStateStatus=\(.mergeStateStatus)"' \
+  > "$STATE/pr.txt" && head -n 1 "$STATE/pr.txt" > "$STATE/head_sha" \
+  && sed -n 2p "$STATE/pr.txt" > "$STATE/base_ref" \
+  && grep -Eq '^[0-9a-f]{40}$' "$STATE/head_sha" && [ -s "$STATE/base_ref" ] \
+  && echo "head=$(cat "$STATE/head_sha") base=$(cat "$STATE/base_ref")"
+cat "$STATE/pr.txt"
+```
+
+沒有印出 `head=<40 碼 SHA> base=<分支名>` → 查詢失敗，歸類「異常」。
+
+**3a. 一次撈齊判斷要用的事實**（整段放在同一次 Bash 呼叫裡跑）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEAD_SHA=$(cat "$STATE/head_sha")
+FACTS_OK=yes; MARK=; MARK_AT=; REV=; REV_AT=; REV_AGE=; HEAD_REC=; FAIL_AT=; FAIL_AGE=; AFTER_REV_N=
+STALL_TOTAL=; STALL_AFTER_MARK=
+# gh 失敗要先接住再 sort：寫成 X=$(gh … | sort) 的話，失敗會被 sort 的 exit 0 蓋掉
+# (1) 最新的 pr-review-response 標記：時間、種類（start／done／failed）、距今秒數
+if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
+  --jq '.[] | (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "")) as $h | select($h | startswith("<!-- pr-review-response:")) | "\(.created_at) \($h | capture("pr-review-response:(?<k>[a-z]+)") | .k) \((now - (.created_at | fromdateiso8601)) | floor)"'); then
+  MARK=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+  MARK_AT=$(printf '%s\n' "$MARK" | cut -d' ' -f1)
+else FACTS_OK=no; fi
+# (2) Summer 在目前這個 SHA 上最新一次 Request changes 的時間與距今秒數
+if RAW=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$HEAD_SHA\") | \"\(.submitted_at) \((now - (.submitted_at | fromdateiso8601)) | floor)\""); then
+  REV=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+  REV_AT=$(printf '%s\n' "$REV" | cut -d' ' -f1)
+  REV_AGE=$(printf '%s\n' "$REV" | cut -s -d' ' -f2)
+else FACTS_OK=no; fi
+# (3) 紀錄留言（固定標題表的前五種、而且有 head SHA 的），PR 與 issue 兩邊都撈。
+#     每行：<時間>\t<SHA>\t<標題>\t<距今秒數>
+REC_JQ='.[] | select(.user.login == "wman-pm")
+  | (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "")) as $h
+  | select(($h | startswith("## 驗收結果：通過（待人類 merge）"))
+      or ($h | startswith("## 驗收結果：不通過"))
+      or ($h | startswith("## 驗收結果：無法驗證（測試環境）"))
+      or ($h | startswith("## 驗收結果：無法驗證（基線紅）"))
+      or ($h | startswith("## 需要人類決定（needs-human）")))
+  | ((.body | capture("head SHA：(?<s>[0-9a-f]{40})") | .s) // "none") as $s
+  | select($s != "none")
+  | "\(.created_at)\t\($s)\t\($h)\t\((now - (.created_at | fromdateiso8601)) | floor)"'
+if PR_REC=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$REC_JQ") \
+  && ISSUE_REC=$(gh api "repos/$REPO/issues/$NUM/comments" --paginate --jq "$REC_JQ"); then
+  ALL_REC=$(printf '%s\n%s\n' "$PR_REC" "$ISSUE_REC" | grep . | sort)
+  # 目前這個 SHA 自己最新的一則紀錄（R4 用）。不能用「所有 SHA 裡最新的一則」：
+  # force push X→Y→X 回到 X 時，最新的是 Y 的紀錄，會把早就驗過的 X 當成沒驗過、重貼一次
+  HEAD_REC=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" '$2 == s {l = $0} END {print l}')
+  # 目前這個 SHA 最新一則「不通過」紀錄的時間（R3 用）
+  FAIL_AT=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" '$2 == s && index($3, "## 驗收結果：不通過") == 1 {t = $1} END {print t}')
+  # 目前這個 SHA、不早於 rev_at 的最新一則「不通過」距今秒數（R3' 確認紀錄已補上用；沒有就空白）
+  FAIL_AGE=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" -v r="$REV_AT" '$2 == s && $1 >= r && index($3, "## 驗收結果：不通過") == 1 {a = $4} END {print a}')
+  # 目前這個 SHA、不早於 rev_at 的「不通過」或第 5 類升級紀錄有幾則（R2 用；沒有 rev_at 時無意義）
+  AFTER_REV_N=$(printf '%s\n' "$ALL_REC" | awk -F '\t' -v s="$HEAD_SHA" -v r="$REV_AT" \
+    '$2 == s && $1 >= r && (index($3, "## 驗收結果：不通過") == 1 || index($3, "## 需要人類決定（needs-human）") == 1) {n++} END {print n + 0}')
+else FACTS_OK=no; fi
+# (4) 這個 SHA 的停滯通報：總共幾則、晚於最新標記的有幾則
+if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | split(\"\n\")[0] | sub(\"^\\\\s+\"; \"\") | startswith(\"## 驗收停滯：PR head 未更新\")) and (.body | contains(\"head SHA：$HEAD_SHA\"))) | .created_at"); then
+  STALL_TOTAL=$(printf '%s\n' "$RAW" | grep -c .)
+  STALL_AFTER_MARK=$(printf '%s\n' "$RAW" | awk -v m="$MARK_AT" 'NF && $1 > m {n++} END {print n + 0}')
+else FACTS_OK=no; fi
+echo "facts_ok=$FACTS_OK head=$HEAD_SHA"
+echo "mark=$MARK"                # <時間> <start|done|failed> <距今秒數>，沒有標記就空白
+echo "rev_at=$REV_AT"            # 目前 SHA 上 Summer 最新的 Request changes 時間，沒有就空白
+echo "rev_age=$REV_AGE"          # 那則 review 距今秒數（R3' 用），沒有就空白
+echo "after_rev_n=$AFTER_REV_N"  # 目前 SHA 上、不早於 rev_at 的不通過／第 5 類升級紀錄數
+echo "head_rec=$HEAD_REC"        # 目前 SHA 最新的紀錄：<時間>\t<SHA>\t<標題>\t<距今秒數>，沒有就空白
+echo "fail_at=$FAIL_AT"          # 目前 SHA 最新「不通過」紀錄的時間，沒有就空白
+echo "fail_age=$FAIL_AGE"        # 目前 SHA、不早於 rev_at 的最新「不通過」距今秒數，沒有就空白
+echo "stall_total=$STALL_TOTAL stall_after_mark=$STALL_AFTER_MARK"
+# 作者在 rev_at 之後有沒有任何回應（R2、R3' 用）
+if [ -n "$REV_AT" ] && [ -n "$MARK_AT" ] && [ "$MARK_AT" != "$REV_AT" ] \
+  && [ "$(printf '%s\n%s\n' "$REV_AT" "$MARK_AT" | sort | tail -n 1)" = "$MARK_AT" ]; then
+  echo "mark_after_rev=yes"
+else
+  echo "mark_after_rev=no"
 fi
 ```
 
-⚠️ **`issue` 一定要用 `-F`，不能用 `-f`**：`-f` 一律把值當字串傳，這裡
-GraphQL 宣告的是 `Int!`，用 `-f` 會型別錯誤。
+`facts_ok=no` → 判斷不了，**這張跳過**，歸類「異常」。不能當成「沒驗過」重跑：
+會重送 review、多算一次重做。
 
-⚠️ **正確欄位名是 `closedByPullRequestsReferences`**——先前版本用過
-一個 `Issue` 型別上根本不存在的欄位名，查了會直接報
-`Field '<欄位名>' doesn't exist on type 'Issue'` 這類錯誤。已用
-introspection 實查過（`gh api graphql -f query='{ __type(name: "Issue")
-{ fields { name } } }'`，唯讀查詢）確認正確欄位名與可用參數；
-`includeClosedPrs:true` 是刻意加的，讓已關閉的 PR 也回傳，下面的分類
-邏輯才看得到「有 PR 但不是 OPEN」這個情況（不加這個參數，欄位預設只
-回傳仍是 OPEN 的 PR，會讓「所有 node 都不是 OPEN」這一格永遠打不到）。
+`--paginate` 時 `--jq` 是逐頁各跑一次，所以 (4) 每則一行再用 `grep -c`／`awk`
+數。ISO 8601 的 UTC 時間字串可以直接用字串比大小。
 
-依回傳結果判斷，**先看查詢本身有沒有報錯**：
+**3b. 依序判斷，第一個符合的就照做**（`mark` 的距今秒數 < 18000 叫「新的
+`start`」（R1 用），≥ 57600 叫「逾時的 `start`」（R3 用）；介於兩者之間（5–16
+小時）的 `start` 兩條都不符合，落到 R4，摘要計入「等作者回應（pr-review-poller
+觸發中）」。5 小時是主機端 `pr-review-poller.sh` 的租約 `PR_REVIEW_LEASE_MIN=300`：
+start 還在租約內，poller 也認定作者還在處理、不會重送。過了 5 小時 poller 會重送、
+叫滿 3 次（約 15 小時）就自己 @ 人類，所以 R3 對「卡住的 start」要等到 16 小時
+才通報，跟 R3' 同一個門檻，不搶在 poller 重送之前通報停滯。那邊改了這裡跟著改
+（2026-10-17 R17 由 2 小時改成 5 小時；fix round 1 I3 把「逾時」拆出來改成 16 小時）。「參考時間」
+＝`rev_at`，空白時用 `fail_at`。「可以通報停滯」＝`stall_after_mark` 是 0
+**而且** `stall_total` < 2）：
 
-- `gh api graphql` 非 0 結束（上面的 `if` 已經攔下並印出
-  `$GRAPHQL_OUTPUT`）→ **不可以當成「沒有 node」靜默滑進 fallback**：
-  GraphQL schema 又變了、權限出問題、暫時性 API 錯誤都會長這樣，而
-  留言比對 fallback 通常還是找得到 PR，會把這個訊號吃掉、沒有人
-  發現，跟前面提到的欄位名打錯、整支 skill 靜默退化成只跑 fallback
-  是同一種失效模式。**直接歸類為「異常」**（見步驟 0），記錄 `gh`
-  印出的原始錯誤訊息，不嘗試 fallback。
-- 查詢成功、剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR，取它的
-  `number`，跳過下面的 fallback，直接進步驟 2。
-- 查詢成功但沒有任何 node，或所有 node 都不是 `OPEN`（`Closes #N`
-  沒寫，或寫的格式 GitHub 辨識不出來）→ 改用下方「Fallback：留言
-  文字比對」。
-- 查詢成功但超過一個 `OPEN` 的 node（理論上不該發生，
-  `closedByPullRequestsReferences` 對應的應該是唯一一張正在等 merge
-  的 PR）→ 無法判斷哪一個才是這輪要驗收的目標，**歸類為「異常」**
-  （見步驟 0），記錄下所有候選 PR 編號讓人類自己判斷，不要自己猜一個
-  當成正確答案。
+| # | 條件 | 做什麼 |
+| --- | --- | --- |
+| R2 | `rev_at` 有值，而且 `after_rev_n` 是 0（目前 SHA 上沒有不早於那則 review 的不通過或第 5 類升級紀錄） | **送回做到一半**：Summer 在這個 SHA 送了 Request changes（送回已完成，作者由 `pr-review-poller` 觸發），之後的不通過留言沒貼成（失敗或被中斷）。走 8d「續做送回」，**不重跑測試、不再送第二則 review**，只補記不通過紀錄。排在 R1 前面也安全：8d 不碰作者、不發任何觸發，只補 issue 上的紀錄 |
+| R1 | `mark` 是新的 `start` | **跳過**：Rick/Morty 正在原分支補 commit，現在的 head 可能只改到一半，驗了只會把半成品判成不通過、白白用掉重做額度。摘要計入「作者處理 review 中」 |
+| R3 | `fail_at` 有值，`mark` 的時間晚於參考時間，而且 `mark` 是 `done`、`failed` 或逾時的 `start` | **停滯（作者已回應但未更新）**：作者回應了（提問、反駁、說超出範圍、失敗，或做到一半卡住），PR head 卻沒變。可以通報停滯 → 走 8e；否則跳過，摘要計入「停滯（已通報）」。**絕不重送** |
+| R3' | `rev_at`、`rev_age` 與 `fail_age` 都有值，`mark_after_rev=no`（作者完全沒有回應），而且 `rev_age` ≥ 57600 | **停滯（作者未回應）**：review 送出超過 16 小時，作者連 `start` 都沒貼。`pr-review-poller` 在 review 之後約 10 分鐘內觸發、每 5 小時重送、叫滿 3 次（約 15 小時）就自己 @ 人類；過了 16 小時還完全沒有標記，代表 bot 一直沒醒，或 poller 本身沒在跑。這則是備援通報（poller 沒在跑時，它是唯一會讓人類知道的路）。可以通報停滯 → 8e（原因寫「作者未回應」）；否則跳過，摘要計入「停滯（已通報）」。**絕不重送**。還沒到 16 小時的不符合本列，會落到 R4（摘要改計入「等作者回應（pr-review-poller 觸發中）」，不要算成「已驗過」） |
+| R4 | `head_rec` 有值（目前 SHA 有任何紀錄） | **冪等**，看 `head_rec` 的標題：`## 驗收結果：無法驗證（測試環境）` 或 `## 驗收結果：無法驗證（基線紅）`，而且這次是**指名單張**觸發 → 人類多半修好了環境或 base branch，繼續往下驗；這兩種、排程觸發 → 跳過，摘要計入「無法驗證（等環境修好）」或「無法驗證（等 base 修好）」；其他標題 → 跳過，摘要計入「已驗過」。**例外**：落到這裡的 5–16 小時 `start`（R1、R3 都不符合），以及送出未滿 16 小時、作者還沒有任何標記的送回（R3' 不符合），摘要計入「等作者回應（pr-review-poller 觸發中）」，不算「已驗過」（2026-10-18 補） |
+| R5 | `mergeable` 是 `UNKNOWN`（剛 push 完常見） | 跳過，下一輪再看，不算失敗。摘要計入「待 GitHub 算合併狀態」 |
+| — | 以上都不符合 | 繼續步驟 4 |
 
-#### Fallback：留言文字比對
+幾點說明：
 
-只有在 GraphQL 找不到唯一的 `OPEN` PR 時才用這條路。改成在 `comments`
-（`gh` 慣例是舊到新排序，最新一則是陣列最後一個）裡找 Rick/Morty 完成
-開發時貼的收尾留言（`solo-feature-pipeline` 步驟 6「建 PR + 通知」），
-它預期包含一個 `https://github.com/<owner>/<repo>/pull/<N>` 形式的
-連結。取**最新**一則含這種連結的留言。
+- R2 只看「不早於 `rev_at`」的紀錄，不看「目前 SHA 有沒有紀錄」：同一個 SHA 先
+  有一則「無法驗證」、之後人類指名重驗才送回；或是 force push X→Y→X 回到舊的
+  SHA——這兩種情況下目前 SHA 上早就有舊紀錄，只看有沒有紀錄會把做到一半的送回
+  誤判成「驗過了」。用 `>=`：同一秒寫下的紀錄也算是這則 review 之後的。
+- R2 排在 R1 前面沒有例外（2026-10-17 改）：原本 8d 會補發 Discord 觸發，review
+  與作者標記落在同一秒時會多觸發一次；現在觸發由 `pr-review-poller` 負責，8d 只
+  補記紀錄，不會打擾正在處理的作者。
+- R3 的參考時間用 `rev_at` 而不是 `fail_at`：作者收到觸發後，可能比 Summer 的
+  不通過留言更早貼出 `start`；拿 review 時間比，才不會漏掉這一輪的回應。
+- R3' 的時間基準是 `rev_age`（review 的年齡）（2026-10-17 改，R17）：原本用
+  `fail_age`，因為當時觸發由本 skill 在 review 之後、紀錄之前發出，紀錄時間最接近
+  「觸發完成」。現在觸發由 `pr-review-poller` 看到 review 就發（約 10 分鐘內），
+  跟紀錄何時貼無關，所以改看 review 的年齡；門檻 16 小時大於 poller 的
+  「3 次 × 5 小時」，讓 poller 先重送、先升級，本 skill 只當備援。`fail_age` 仍要
+  有值：沒有紀錄的話是 R2 的事（先補記）。
+- R3' 只在 `rev_at` 有值時成立：作者不是 bot 帳號、或第 5 類升級那兩條路沒有送
+  review，poller 也就不會觸發，本來就不會有作者的標記，不能算「沒回應」。
+- 停滯通報的去重：只看「晚於作者最新標記」的通報，每個 SHA 最多 2 則。先因為
+  「作者未回應」通報過，作者之後才貼 `done`（標記比那則通報新）→ R3 還能再
+  通報一次「作者已回應但未更新」，不會被先前那則吃掉；同一種情況不會重報。
+- R3、R3' 只在 PR head **沒變**時成立：作者推了新 commit，SHA 就變了，`fail_at`
+  是空的，直接走 R4 以後的正常驗收。
+- 驗收基準那種 needs-human 留言**刻意不寫 SHA**：寫了的話，人類補上基準之後
+  PR head 沒變，R4 就會把它當成「驗過了」永遠跳過。
 
-**兩條路都落空才歸類為「異常」，不是「跳過」**（見步驟 0 的分類）：
-`agent-done` 已經貼上卻兩種方式都定位不到對應 PR，代表 `Closes #N`
-沒寫、留言格式也跟預期不符，或流程中斷，或這張根本不是走正常路徑貼上
-這個 label 的。記錄下來，繼續處理範圍內其餘 issue，但在 Discord 摘要
-裡要單獨列出，不要跟「已驗收過」的正常跳過混在一起——不要憑 issue
-標題或猜測去湊一個 PR 編號。
+### 4. 取得驗收基準——三層，依序找
 
-### 2. 冪等檢查
+**第一層：「✅ 需求共識」**。`jira-grill` 收斂時貼的共識留言：第一行去掉
+前後空白、拿掉所有 `*` 之後以 `✅ 需求共識` 開頭（實際長相是
+`✅ **需求共識**`，作者是 grill 的 bot，舊單可能是 `wm4n`），取最新一則。
+它的「驗收條件」段就是基準清單，再疊加之後的修正：
+
+- 它之後有 `wman-pm` 第一行 `## Summer 已修正規格` 的留言（`backlog-triage`
+  修過規格）→ 修正寫在 issue **body**：Summer 自己開的單是直接改了 body
+  的對應段落（留言的「變更摘要」點名改了哪段）；人類開的單是在 body 末尾
+  附加 `## Summer 規格修正（YYYY-MM-DD）`。把修正疊加到基準清單上，衝突時以
+  修正為準，多段修正段以日期最新的為準。不要拿整份 body 取代共識：body 其餘
+  部分是開單當下的草稿，精煉程度不如共識。
+- 它之後有 `wm4n` 明確指定或修改驗收基準的留言 → 照人類說的做，人類的明確
+  指定永遠優先。
+
+**第二層（沒有共識時）：issue body 與人類留言**，報告裡標明
+**「基準較弱（沒有 grill 共識）」**：
+
+- body 的驗收條件段：`## 驗收條件` 或 `## Acceptance criteria`；
+- body 末尾的 `## Summer 規格修正（YYYY-MM-DD）` 段（日期最新的為準，衝突時
+  修正段優先）；
+- `wm4n` 的留言。**`wm4n` 明確指定驗收基準的留言優先於上面兩項**——例如
+  `chainbreak#82` 2026-10-16 那則 `## 指定驗收基準（人類決定）`：照它列的來源
+  與排除項目驗（它說 `## 已知缺口（這一張刻意不做）` 不算缺漏，就不能判成
+  不滿足）。
+
+**第三層：上面都拼不出一份具體的條件清單** → 不要憑標題或 PR 描述自己腦補。
+先看有沒有本 skill 為驗收基準升級過（見「絕不重新加回」）：
+
+- 沒有 → 走「貼 `needs-human` 的固定順序」，卡點寫「需要人決定驗收基準」，
+  **不寫 SHA**。這不是驗收不通過：不送 review、不算重做、不貼
+  `## 驗收結果：不通過`。
+- 有，label 已被人類移除 → 跳過，摘要列「人類已處理升級但仍無驗收基準」。
+  （label 還在的話，步驟 1 已經跳過，不會走到這裡。）
+
+### 5. 逐條比對驗收條件
 
 ```bash
-gh pr view "$PR_NUM" --repo "$REPO" --json number,title,body,url,comments
-```
-
-看 PR 的 `comments` 裡有沒有已經帶 `— By Summer (acceptance-review)`
-簽名的留言：
-
-- 有 → 這張已經驗收過（可能是排程重複觸發，也可能是驗收完還沒
-  merge）→ **跳過（正常冪等，不是異常）**，不重貼，輸出盡量精簡，
-  Discord 摘要歸進「跳過」那一類。
-- 沒有 → 繼續步驟 3。
-
-### 3. 取得驗收條件——以「✅ 需求共識」為基準，疊加增量修正
-
-`jira-grill` **從不寫回 issue body**——body 從頭到尾是 `product-planning`
-（或人類）開單當下的原始草稿。留言串裡 `jira-grill` 貼的「✅ 需求
-共識」comment，才是把整輪 grill Q&A **蒸餾**成的最終需求（背景、確認
-的需求範圍、驗收條件、目標 repo），涵蓋範圍比原始 body 完整。
-
-1. 以留言串裡「✅ 需求共識」comment 所列的驗收條件為**基準清單**。
-   找不到這則 comment → 歸類為「異常」（見步驟 0），記錄並跳過，不要
-   憑 issue 標題或描述自己腦補一組驗收條件。
-2. 若留言串裡還有 `backlog-triage` 貼的「依 Rick/Morty 的規格問題
-   調整了描述，變更摘要：……」留言（代表這張經歷過 `agent-failed` →
-   修描述 → 重新開發的迴圈），把該留言點名的異動（新增、刪除或修改了
-   哪一條）疊加到步驟 1 的基準清單上，得出目前應該逐條核對的完整
-   清單。**不要改用目前的 issue body 整個取代基準**：body 只有
-   `backlog-triage` 動過的那個缺口是新的，其餘部分是開單當下的原始
-   草稿，精煉程度不如「✅ 需求共識」——直接改用 body 會遺失 grill
-   階段對其他條件的精煉結果。
-3. 沒有 `backlog-triage` 的變更留言 → 步驟 1 的基準清單就是最終清單，
-   不用再對照 body。
-
-### 4. 取得 PR 內容
-
-```bash
-gh pr view "$PR_NUM" --repo "$REPO" --json number,title,body,url
+gh pr view "$PR_NUM" --repo "$REPO" --json title,body
 gh pr diff "$PR_NUM" --repo "$REPO"
 ```
 
-只需要文字 diff 與 PR 描述，**不 clone repo、不建 worktree、不切
-分支**——這支 skill 讀規格符合度，不需要在本地執行或瀏覽完整程式碼庫。
+對基準清單**逐條**對照 diff 與 PR 描述（步驟 6 的 checkout 也可以拿來讀完整
+檔案），判定：
 
-### 5. 逐條比對並輸出
+- ✅ **滿足**：寫下具體依據（哪個檔案、哪段邏輯、哪個測試）。
+- ❌ **不滿足**：看不出做到、或明確衝突，寫下缺了什麼。「PR 沒有提供證據」
+  也是不滿足。
+- ❓ **需人類實機確認**：只限條件本身就要在實機上觀察（手感、聲音、畫面），
+  程式碼與測試都無法驗證的。寫下為什麼只能實機確認。不要拿 ❓ 逃避判斷：
+  能從程式碼或測試判斷的，就判 ✅ 或 ❌。
 
-對步驟 3 找到的驗收條件清單，**逐條**對照步驟 4 的 diff 與描述，三選一
-判定：
+**只看規格符合度**，不評論程式碼風格、效能、命名——那是作者自我審查的職責。
 
-- ✅ **滿足**：diff 或描述明確做到了這一條，寫下具體依據（改了哪個
-  檔案／哪段邏輯）。
-- ❌ **不滿足**：diff 或描述看不出做到，或明確跟這一條衝突，寫下缺了
-  什麼。
-- ❓ **無法判斷**：光看 diff 與描述無法確認（例如要求的是執行期行為，
-  純讀程式碼看不出結果），寫下為什麼判斷不了，**不要為了湊出結論硬猜
-  一個滿足或不滿足**。
+### 6. 自己跑測試（spec D 條件 3）
 
-按下方模板貼 PR comment，並把這輪的結果依步驟 0 的三個分類（本輪驗收
-完成／跳過／異常）彙整成**一則** Discord 摘要——同一輪掃到多張，合併
-成一則訊息，不要逐張各發一則（同 `backlog-triage` 的慣例，也是避免
-Discord 2000 字限制被輕易用完的做法），但三個分類要分開列，不要把
-「跳過」跟「異常」揉成同一句籠統的「跳過 N 張」。
+**驗收條件已經有 ❌ 也要跑**：一次 Request changes 把所有問題列齊，作者一輪就
+能修完。每送回一次就用掉一次重做額度，分兩次送回等於白白浪費一次。
 
-## 送回開發（人類點頭後才執行）
-
-若某張的結果含「不滿足」，PR comment 與 Discord 摘要都只**提議**送回
-`ready-for-agent`，不自行改 label。只有人類在後續對話明確點頭（例如
-「同意，退回去修」「送回 ready-for-agent」）之後，才在**後續 turn**
-執行：
+**6a. 在乾淨的 worktree 檢出 PR head**（不在 base clone 上切分支）：
 
 ```bash
-gh issue edit "$NUM" --repo "$REPO" --add-label ready-for-agent
-gh issue edit "$NUM" --repo "$REPO" --remove-label agent-done
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEAD_SHA=$(cat "$STATE/head_sha")
+BASE="/home/node/repos/$OWNER/$REPO_NAME"
+WT="/home/node/repos/$OWNER/$REPO_NAME-worktrees/accept-pr-$PR_NUM"
+printf '%s' "$WT" > "$STATE/wt"
+[ -d "$BASE/.git" ] || gh repo clone "$REPO" "$BASE"
+git -C "$BASE" fetch origin
+git -C "$BASE" fetch origin "+refs/pull/$PR_NUM/head:refs/remotes/origin/accept-pr-$PR_NUM"
+git -C "$BASE" worktree prune
+# 上一輪被中斷留下的同名 worktree 先清掉；目錄還在、卻沒註冊成 worktree 的（remove 會失敗），直接刪目錄
+[ -e "$WT" ] && git -C "$BASE" worktree remove --force "$WT"
+[ -e "$WT" ] && /bin/rm -rf "$WT" && git -C "$BASE" worktree prune
+if git -C "$BASE" worktree add --detach "$WT" "$HEAD_SHA" \
+  && [ "$(git -C "$WT" rev-parse HEAD)" = "$HEAD_SHA" ]; then
+  echo "WT_OK $WT"
+else
+  echo "WT_FAILED"
+fi
 ```
 
-**先加後移除**（同 `backlog-triage` 既有的順序鐵則）：中間若失敗，至少
-不會讓這張 issue 兩個 label 都沒有、變成沒有任何 poller 撿得到。改完
-label 後，在 issue 上貼一則說明「驗收發現哪些條件不滿足、經人類確認
-送回開發」的留言，簽名用一般的 `— By Summer`（不是
-`— By Summer (acceptance-review)`——這是新一輪處理的起點，不是同一次
-驗收紀錄的延伸）。
+`WT_FAILED` → 環境跑不起來（見 6c），不是作者的錯。
 
-**已開的舊 PR 不會自動關閉**，要不要關閉、要不要留著給下一輪開發參考，
-留給人類決定，本 skill 不處理。
+**6b. 測試指令一律從 PR 的 base branch 讀，不從 PR head 讀**：作者可以在同一張
+PR 裡把 `CLAUDE.md` 的測試指令改弱或刪掉，從 PR head 讀等於讓被驗的人自己決定
+怎麼驗。指令來自 PR 要合進去的那個分支（`baseRefName`，步驟 3 存在
+`$STATE/base_ref`），**執行地點**才是 PR head 的 worktree：
 
-## PR comment 模板與簽名協定
-
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+BASE="/home/node/repos/$OWNER/$REPO_NAME"; HEAD_SHA=$(cat "$STATE/head_sha"); BREF=$(cat "$STATE/base_ref")
+if [ -n "$BREF" ] && git -C "$BASE" rev-parse --verify -q "origin/$BREF" >/dev/null; then
+  echo "BASE_REF_OK origin/$BREF"
+  for DOC in CLAUDE.md AGENTS.md; do
+    git -C "$BASE" show "origin/$BREF:$DOC" > "$STATE/base-$DOC" 2>/dev/null && echo "BASE_DOC $DOC" || /bin/rm -f "$STATE/base-$DOC"
+  done
+  git -C "$BASE" cat-file -e "origin/$BREF:pubspec.yaml" 2>/dev/null && echo "FLUTTER_REPO"
+  # PR 相對 base 動了哪些檔。--no-renames：改名會拆成 D（舊路徑）＋A（新路徑），
+  # 把測試檔改名搬出 test/ 也會留下一行 D，不會因為只看新路徑而漏報
+  git -C "$BASE" diff --no-renames --name-status "origin/$BREF...$HEAD_SHA" > "$STATE/changed.tsv" && echo "DIFF_OK"
+else
+  echo "BASE_REF_FAILED"
+fi
 ```
-## 驗收結果
 
-對照 issue #<N> 的驗收條件：
+- 讀 `$STATE/base-CLAUDE.md`（以及 `base-AGENTS.md`，有的話）找該 repo 規定的
+  測試／檢查指令。**不要讀 worktree 裡的 `CLAUDE.md`／`AGENTS.md`。**
+- 印出 `FLUTTER_REPO`（base 有 `pubspec.yaml`）→ **不論文件怎麼寫，至少要跑
+  `flutter analyze` 與 `flutter test`**（先 `flutter pub get`）。
+- repo 有 mise 設定檔（`.mise.toml`／`mise.toml`）時先在 worktree 跑
+  `mise trust` 與 `mise install`。
+- **最後的指令清單是空的**（不是 Flutter，文件裡也找不到任何測試指令），或印出
+  `BASE_REF_FAILED`、沒印出 `DIFF_OK` → 沒有測試證據，**絕不算通過**：
+  照「環境跑不起來」處理（6c），結果走 8c「無法驗證」。
+- **把指令的實際來源寫進狀態檔**，結果留言照抄它，不要寫死「CLAUDE.md」：
+
+  ```bash
+  STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+  # 例：base branch `main` 的 CLAUDE.md＋Flutter 最低要求（flutter analyze、flutter test）
+  printf '%s' '<base branch `<分支>` 的哪份文件（CLAUDE.md／AGENTS.md／兩者）＋是否套用 Flutter 最低要求>' > "$STATE/test_source"
+  ```
+
+**PR 動到測試、測試指令或測試設定，要讓人類看見**：指令雖然來自 base，執行時
+讀的設定檔卻來自 PR head——`analysis_options.yaml` 可以關掉 lint、
+`dart_test.yaml` 可以跳過測試、`pubspec.yaml`／`pubspec_overrides.yaml` 可以換掉
+測試相依、`Makefile` 與工具版本設定（`.tool-versions`；mise 的 `mise.toml`、
+`.mise.toml`、`mise.<env>.toml`、`.mise.<env>.toml`（含 `mise.local.toml`）、
+`mise/config.toml`、`mise/config.<env>.toml`，以及 `.config/mise/`、`.mise/` 底下的
+檔案）可以改掉指令實際做的事或用到的工具版本。這些一律列出來（2026-10-18 補
+`mise.<env>.toml` 與 `mise/config.toml`）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+# 測試指令文件、測試設定檔、測試檔（test/、tests/、integration_test/、*_test.*、test_*）；D 開頭是刪除
+awk -F '\t' '{p = $NF}
+  p ~ /(^|\/)(CLAUDE|AGENTS)\.md$/ \
+  || p ~ /(^|\/)(analysis_options\.yaml|dart_test\.yaml|pubspec\.yaml|pubspec_overrides\.yaml|Makefile|\.tool-versions)$/ \
+  || p ~ /(^|\/)\.?mise(\.[^\/]+)?\.toml$/ \
+  || p ~ /(^|\/)mise\/config(\.[^\/]+)?\.toml$/ \
+  || p ~ /(^|\/)(\.config\/mise|\.mise)\// \
+  || p ~ /(^|\/)(test|tests|integration_test)\// \
+  || p ~ /(_test\.[a-z]+|(^|\/)test_[^\/]*)$/ {print}' \
+  "$STATE/changed.tsv" > "$STATE/sensitive.tsv"
+cat "$STATE/sensitive.tsv"
+```
+
+有輸出 → 在這張的結果留言（通過、不通過、無法驗證都一樣）加一段
+「⚠️ 本 PR 動到測試或測試指令」，逐行列出（`D` 開頭的標明「刪除」）。這不會讓
+結果變成不通過——改測試、改設定本來就常見——但人類 merge 前要看得到；刪掉測試
+檔、或把測試設定改弱，人類可能就不該 merge。
+
+**逐一執行**：每個指令都照這個模式跑，把 exit code 與 log 存進狀態目錄：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+WT=$(cat "$STATE/wt")
+NAME=flutter-test                 # 每個指令一個名字：flutter-pub-get、flutter-analyze……
+CMD='flutter test'                # 實際要跑的指令
+( cd "$WT" && eval "$CMD" ) > "$STATE/$NAME.log" 2>&1
+RC=$?
+printf '%s\t%s\t%s\n' "$NAME" "$RC" "$CMD" >> "$STATE/tests.tsv"
+echo "$NAME exit=$RC"
+tail -n 15 "$STATE/$NAME.log"
+```
+
+**exit code 不是 0 就是失敗**，不要因為輸出「看起來只是警告」就放過。
+
+**6b'. head 有指令失敗時，對 base branch 跑同一組指令（Ruling R18，2026-10-17）**：
+base 自己就紅的話，每張 PR 都會被判不通過、白白燒掉重做額度，兩輪就全部轉成
+`needs-human`。所以 head 上有任何指令 exit ≠ 0，就在另一個乾淨的 worktree 檢出
+`origin/<base_ref>`，**照同一個順序跑同一組指令**（含 `flutter pub get`、`mise
+install` 這類前置）。head 全部 exit 0 就不必跑——base 的結果只在 head 失敗時才有意義。
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+BASE="/home/node/repos/$OWNER/$REPO_NAME"; BREF=$(cat "$STATE/base_ref")
+WTB="/home/node/repos/$OWNER/$REPO_NAME-worktrees/accept-pr-$PR_NUM-base"
+printf '%s' "$WTB" > "$STATE/wt_base"
+[ -e "$WTB" ] && git -C "$BASE" worktree remove --force "$WTB"
+[ -e "$WTB" ] && /bin/rm -rf "$WTB" && git -C "$BASE" worktree prune
+if git -C "$BASE" worktree add --detach "$WTB" "origin/$BREF" \
+  && git -C "$WTB" rev-parse HEAD > "$STATE/base_sha" && grep -Eq '^[0-9a-f]{40}$' "$STATE/base_sha"; then
+  echo "WTB_OK $WTB base=$(cat "$STATE/base_sha")"
+else
+  echo "WTB_FAILED"
+fi
+```
+
+每個指令一樣存 exit code 與 log，只是檔名加 `base-` 前綴、寫進 `base-tests.tsv`：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+WTB=$(cat "$STATE/wt_base")
+NAME=flutter-test; CMD='flutter test'   # 與 head 那次同名、同指令
+( cd "$WTB" && eval "$CMD" ) > "$STATE/base-$NAME.log" 2>&1
+RC=$?
+printf '%s\t%s\t%s\n' "$NAME" "$RC" "$CMD" >> "$STATE/base-tests.tsv"
+echo "base $NAME exit=$RC"
+tail -n 15 "$STATE/base-$NAME.log"
+```
+
+**6c. 分清楚「測試失敗」「基線紅」與「環境跑不起來」**——三者都**絕不算通過**，
+差別只在該由誰修。對 head 上**每一個** exit ≠ 0 的指令，依序判斷，第一個符合的
+就是它的歸類：
+
+1. **環境跑不起來（Summer 這邊的問題）**：`flutter`／`mise` 找不到（exit 127、
+   `command not found`）、mise 報錯、`flutter pub get` 下載失敗、6a 的
+   `WT_FAILED`、6b 拿不到測試指令（清單是空的、查不到 PR 的 base branch）。
+2. **base 那邊跑不出可比的結果**：6b' 印出 `WTB_FAILED`，或 base 上同一個指令是
+   上一項的環境問題 → 分不清是不是作者的錯，**當作環境跑不起來**。
+3. **基線紅（base 的問題）**：base 上同一個指令也 exit ≠ 0（而且不是環境問題）。
+   這不是作者造成的，送回只會讓 Rick/Morty 修不屬於這張單的東西、用掉重做額度。
+4. **測試失敗（作者的問題）**：base 上同一個指令 exit 0、head 上卻失敗。**只有
+   這一種算不通過的「測試失敗」。**
+
+**前置指令壞了，後面的都不比**（fix round 1 I2）：同一邊（head 或 base）只要有一個
+前置指令（`flutter pub get`、`mise trust`／`mise install` 這類準備環境、裝依賴的指令）
+被歸為環境問題，**那一邊在它之後的所有指令一律算環境問題**，不拿來跟另一邊比——依賴
+沒裝好，後面的 `analyze`／`test` 失敗只是連鎖反應，拿去比會被誤判成「測試失敗」或
+「基線紅」。head 的前置壞了 → head 之後的失敗都是第 1 類；base 的前置壞了 → head
+上失敗的指令都落在第 2 類。
+
+分不清是哪一種時，**當作環境跑不起來**：送回給作者修不了 Summer 的環境，只會讓
+Rick/Morty 白跑一輪、用掉重做額度。
+
+**6d. 一定要移除 worktree**（測試過或沒過、中途出錯都要做；6b' 建過 base 的
+worktree 也一起移除）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+BASE="/home/node/repos/$OWNER/$REPO_NAME"; ALL_GONE=yes
+for F in wt wt_base; do
+  [ -s "$STATE/$F" ] || continue
+  W=$(cat "$STATE/$F")
+  git -C "$BASE" worktree remove --force "$W"
+  git -C "$BASE" worktree prune
+  { [ ! -e "$W" ] && ! git -C "$BASE" worktree list | grep -qF "$W"; } || ALL_GONE=no
+done
+[ "$ALL_GONE" = yes ] && echo "WT_REMOVED"
+```
+
+沒印出 `WT_REMOVED` → 記進摘要（不影響驗收結果；下一輪 6a 會先清掉同名殘留）。
+
+### 7. 合併條件與最後確認（spec D 的條件，依序）
+
+**最後確認（寫任何結果之前）**：重讀一次 PR：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid,mergeable,mergeStateStatus \
+  --jq '"\(.headRefOid)\nmergeable=\(.mergeable)\nmergeStateStatus=\(.mergeStateStatus)"' > "$STATE/pr_final.txt" \
+  && [ "$(head -n 1 "$STATE/pr_final.txt")" = "$(cat "$STATE/head_sha")" ] \
+  && echo "SHA_SAME" || echo "SHA_MOVED_OR_FAILED"
+cat "$STATE/pr_final.txt"
+```
+
+`SHA_MOVED_OR_FAILED`（驗收途中又有新 commit，或查詢失敗）→ **什麼都不貼**，
+這張跳過，下一輪對新的 SHA 重驗。結果一定要綁在真的被驗過的那個 commit 上。
+`mergeable` 變成 `UNKNOWN` → 一樣什麼都不貼，下一輪再看。
+
+設計（spec D）原本規定全部成立才 merge 的五個條件，這一版**照樣依序檢查、寫進
+結果**，只是最後不 merge（條件 4 用上面 `pr_final.txt` 的值）：
+
+1. PR 作者是 bot 帳號（`wman-dev`／`wman-review`）、repo 在白名單、issue 沒有
+   `needs-human`。**作者不是 bot 帳號不擋「通過」留言**（人類本來就要自己 merge），
+   但要在結果裡寫「條件 1 不成立：PR 作者是 <login>」，而且不通過時不送回（見
+   步驟 8b）。例：`chainbreak#82` 的 PR #93 作者是 `wm4n`（帳號分離前開的，body
+   雖然簽 Rick），就走這條。
+2. 驗收對應的是 PR **目前的** head SHA——上面的最後確認。
+3. Summer 自跑的測試全部 exit 0（步驟 6）。
+4. 能合併：`mergeable` 是 `MERGEABLE`。`CONFLICTING`（`mergeStateStatus` 為
+   `DIRTY`）→ 有衝突，算不通過，要求作者 rebase 到 PR 的 base 分支（`$STATE/base_ref`）最新版。其他
+   `mergeStateStatus` 值照實寫進結果。
+5. 每輪最多 merge 一張——這一版不自動 merge，寫「不適用（自動 merge 暫緩）」。
+
+### 8. 依結果寫回
+
+先把結果歸成下列之一：
+
+| 結果 | 條件（由上往下，第一個符合的） |
+| --- | --- |
+| **不通過** | 有任何 ❌、有 6c 歸類為「測試失敗」的指令（base 綠、head 紅）、或有衝突 |
+| **無法驗證（基線紅）** | 沒有上一列任何一項，但有 6c 歸類為「基線紅」的指令（base 與 head 都紅） |
+| **無法驗證（測試環境）** | 沒有上兩列任何一項，但測試因環境跑不起來，或拿不到測試指令（6b 清單是空的、查不到 PR 的 base branch） |
+| **通過** | 每條驗收條件都是 ✅ 或 ❓、測試清單不是空的而且 head 上全部 exit 0、沒有衝突 |
+
+「不通過」又碰上環境問題或基線紅時（例如有 ❌，而且某個指令 base 也紅）照
+「不通過」處理，在理由裡註明哪些指令是 base 本身就失敗（不是作者造成的、不必修）、
+哪些因環境沒跑成。**基線紅絕不算通過，也不算重做**（R18）。
+
+#### 8a. 通過
+
+**第 1 步：在 PR 貼結果**（第一行逐字照抄）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '## 驗收結果：通過（待人類 merge）\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+對照 issue #<N> 的驗收基準：<「✅ 需求共識」（附連結）／基準較弱（沒有 grill 共識）：<列出用了哪些來源>>
 
 | # | 驗收條件 | 結果 | 依據 |
 | --- | --- | --- | --- |
-| 1 | <驗收條件原文> | ✅ 滿足 | <引用具體改動或 PR 描述段落> |
-| 2 | <驗收條件原文> | ❌ 不滿足 | <說明缺了什麼> |
-| 3 | <驗收條件原文> | ❓ 無法判斷 | <說明為何從 diff／描述判斷不出來> |
+| 1 | <驗收條件原文> | ✅ 滿足 | <具體依據> |
+| 2 | <驗收條件原文> | ❓ 需人類實機確認 | <為什麼只能實機確認> |
 
-總結：<M> 條中滿足 <X> 條、不滿足 <Y> 條、無法判斷 <Z> 條。
+### 合併條件（依序）
 
----
-— By Summer (acceptance-review)
+1. PR 作者／白名單／needs-human：<成立／不成立：PR 作者是 <login>，不是 bot 帳號>
+2. head SHA：測試前後讀到的是同一個 commit
+3. 自跑測試：全部 exit 0（見下方）
+4. 可合併：mergeable=MERGEABLE，mergeStateStatus=<值>
+5. 每輪最多 merge 一張：不適用（自動 merge 暫緩）
+EOF
+# PR 動到測試或測試指令（6b 產生的清單），有才印
+if [ -s "$STATE/sensitive.tsv" ]; then
+  printf '\n### ⚠️ 本 PR 動到測試或測試指令（merge 前請確認）\n\n'
+  awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
+fi
+printf '\n### 測試（指令來源：%s；在上面那個 head SHA 的乾淨 checkout 執行）\n' "$( [ -s "$STATE/test_source" ] && cat "$STATE/test_source" || printf '未知' )"
+while IFS="$(printf '\t')" read -r NAME RC CMD; do
+  printf '\n`%s` → exit %s\n\n~~~\n' "$CMD" "$RC"
+  tail -n 15 "$STATE/$NAME.log"
+  printf '~~~\n'
+done < "$STATE/tests.tsv"
+# Summer 之前在舊 commit 上送過 Request changes 的話，寫明這則結果取代它
+if gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
+  --jq '.[] | select(.user.login == "wman-pm" and .state == "CHANGES_REQUESTED") | .id' | grep -q .; then
+  printf '\n本結果取代 Summer 先前在舊 commit 上送出的 Request changes：那些項目已在上面這個 head SHA 重新驗過。GitHub 上那則 review 仍會顯示「Changes requested」，人類 merge 前可直接 dismiss。\n'
+fi
+cat <<'EOF'
+
+自動 approve＋merge 暫緩中（等人類決定是否開放），請人類確認本結果後 merge。<有 ❓ 時加一句：merge 前請先實機確認標 ❓ 的條目。>
+EOF
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
 ```
 
-**簽名字串一律逐字使用 `— By Summer (acceptance-review)`**（開頭是 em
-dash「—」，不是連字號「-」；括號裡固定是 `acceptance-review`）。這串
-簽名同時是步驟 2 的冪等依據，改了格式下一輪掃描會判斷失準——同一張會
-被重複驗收，或反過來被誤判成已驗收而永遠跳過。
+確認真的貼上了，並取得留言網址：
 
-⚠️ **不可以誤用 `jira-grill` 的 `(jira-grill)` 結尾**，即便如此，
-`grill-poller.sh`／`agent-dev-poller.sh` 兩支 poller 都不是用 `gh`
-CLI，而是直接 `curl` 打 GitHub REST API 的
-`/repos/<owner>/<repo>/issues?labels=<label>` 端點——這個端點本身**會**
-把符合 label 的 PR 一併吐回來（PR 在 GitHub API 底層也是 issue），兩支
-poller 各自在處理回應的 `node -e` 裡用 `if (i.pull_request) continue;`
-明確過濾掉，才不會把 PR 誤判成新目標。本 skill **從不對 PR 貼任何
-label**，所以即使 PR 會被那個端點吐回來，也不會符合任何一支 poller
-的 `labels=` 篩選條件，更不會被誤判成新目標觸發它們。
-
-## Discord 摘要模板
-
-只放結論與可定位的 issue／PR 編號（`repo#N`／`PR #N`，白名單只有兩個
-repo，不需要完整 URL 也能定位），完整的逐條依據留在 PR 留言裡。三個
-分類（見「流程」步驟 0）**分開列**，「跳過」與「異常」不可合併：
-
-```
-📋 驗收完成 <M> 張：
-✅ chainbreak#12（PR #34）— 3/3 滿足
-⚠️ hangman#8（PR #19）— 2/3 滿足，1 條不滿足（結算頁未做防抖），
-   建議送回 ready-for-agent，待人類點頭
-
-已跳過（已驗收過，正常）：2 張——chainbreak#20（PR #40）、hangman#5（PR #11）
-
-⚠️ 異常（找不到對應 PR 或驗收條件，需要人類確認）：1 張——chainbreak#31
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | startswith(\"## 驗收結果：通過（待人類 merge）\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
 ```
 
-若這輪掃全部、`$TOTAL` = 0，改貼：
+沒有輸出 → 失敗，不做第 2 步，記進摘要（下一輪沒有紀錄會重驗）。
 
+**第 2 步：在 issue 貼一行連結**（`<第 1 步的留言網址>` 換成上面印出的網址）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '驗收通過，待人類 merge：%s（head SHA %s）\n' '<第 1 步的留言網址>' "$(cut -c1-7 "$STATE/head_sha")"
+printf '\n— By Summer (acceptance-review)\n'
+} | gh issue comment "$NUM" --repo "$REPO" --body-file -
 ```
-📋 本輪掃描 agent-done：0 張（chainbreak／hangman 皆無）
+
+失敗 → 記進摘要，不重試（PR 上的結果已經在，下一輪冪等跳過，不會補貼）。
+
+**第 3 步：不要自己 @ 人類**（2026-10-17 改，R17）。第 1 步那則
+`## 驗收結果：通過（待人類 merge）` 一貼上，主機端 `human-notifier.sh` 就會在
+`bot-notify` @ 人類一次並附留言連結。同一個 SHA 只會通過一次，所以每張 PR 只會
+因此被通知一次。本輪摘要照常列出（不帶 @）。
+
+**issue 的 `agent-done` 不動**：merge 之後 PR 的 `Closes #` 會自動關閉 issue。
+
+#### 8b. 不通過
+
+**第 1 步：先算重做次數**（任何寫入之前，見「重做次數」）。`rework=FAILED` →
+**這張本輪什麼都不寫**（不送回、不留言），歸類「異常」，下一輪重算。少算一次
+就可能多送回一次，查詢失敗絕不能當成 0。
+
+**第 2 步：依情況選一條路**，從上往下第一個符合的：
+
+| 情況 | 做什麼 |
+| --- | --- |
+| PR 作者不是 `wman-dev`／`wman-review` | **不送回**：只貼不通過留言（第 3 步），**第一行用 `## 驗收結果：不通過（作者非 bot，待人類處理）`**。`human-notifier.sh` 依這個標題通知人類處理；本 skill 不 @ |
+| `rework_after` ≥ 2 | **不送回**：走「貼 `needs-human` 的固定順序」（第 5 類，留言要寫 SHA）。label 加不上就整張停手，連不通過留言都不貼；加上了，等 needs-human 留言貼好，再貼不通過留言（第 3 步）。@ 由 human-notifier 依 label 事件發 |
+| `rework_after` < 2 | **送回**：下面 i → ii |
+
+作者不是 bot 帳號時連 Request changes 都不送：`pr-review-poller` 對帳號分離
+（2026-10-03）之前開的舊 PR 會認 PR body 的 bot 簽名（例如 `chainbreak#93`，作者
+`wm4n`、body 簽 Rick），看到 Request changes 一樣會叫 bot 回來改，等於繞過「不送回」。
+
+**「送回完成」的定義（2026-10-17 改，R17）**：目前的 head SHA 上存在 `wman-pm` 的
+`CHANGES_REQUESTED` review。觸發作者不是本 skill 的事——主機端 `pr-review-poller.sh`
+看到這則還沒被回應的 review，就會在 `bot-notify` 觸發作者跑 `pr-review-response`、
+沒下文就重送、叫滿 3 次就 @ 人類。本 skill **不發任何 Discord 觸發**（原本的
+「ii. 在 `bot-notify` 觸發作者」已移除：本 skill 跑在 `summer-pm` 的 thread，那則
+觸發從來送不到 Rick／Morty）。
+
+**送回的兩步（順序固定，任一步失敗就停在那一步，記進摘要）**：
+
+i. **送 Request changes review，綁在驗過的 head SHA 上**，逐條列出未滿足的驗收
+   條件、失敗的測試（指令與輸出結尾；base 也紅的指令另外標明不必修）、或要求
+   rebase 到 PR 的 base 分支（`$STATE/base_ref`，例如 `main`）最新版解衝突。
+   用 `gh api` 帶 `commit_id` 送，不用 `gh pr review`：後者綁的是送出當下的 head，
+   驗收途中若有人 push，review 會落在沒驗過的 commit 上（final review M2）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '驗收不通過（head SHA：%s）\n\n' "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+請在原分支修正下列項目：
+
+- <驗收條件 #2：缺了什麼>
+- <`flutter test` exit 1：失敗的測試與錯誤摘要>
+- <有衝突：請 rebase 到最新的 <base_ref 的值> 解衝突>
+EOF
+printf '\n— By Summer (acceptance-review)\n'
+} | gh api "repos/$REPO/pulls/$PR_NUM/reviews" -f commit_id="$(cat "$STATE/head_sha")" -f event=REQUEST_CHANGES -F body=@- --jq '.id'
+gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$(cat "$STATE/head_sha")\") | .id"
 ```
 
-這則訊息本身就是完成條件，不是「沒事可做就不用發」——見「流程」步驟 0
-對「零筆」的說明。
+   第二個指令（綁在目前 head SHA 上的 `wman-pm` Request changes）有印出 id 才算
+   成功——這就是「送回完成」。失敗 → 停，不留言；下一輪沒有紀錄會重驗、重送。
 
-單輪超過約 8 張時，只列前幾張的細節，其餘改成「還有 N 張，結果同上
-分類，詳見各自 PR 留言」——避免逐張列到超過 Discord 2000 字上限；
-「異常」分類的項目不受此精簡影響，數量不多時應全部列出，因為這是
-需要人類逐一確認的訊號，不是可以概括帶過的正常結果。
+ii. **在 issue 貼不通過留言**（第 3 步）。
+
+**第 3 步：在 issue 貼不通過留言**（三條路都要貼——它記下這個 SHA 驗過了，也是
+重做次數的計數來源）。第一行逐字照抄，依路線二選一：PR 作者不是 bot 帳號 →
+`## 驗收結果：不通過（作者非 bot，待人類處理）`（human-notifier 會通知人類）；其他兩條路（送回、第 5 類）→
+`## 驗收結果：不通過`（不通知：送回由 pr-review-poller 觸發作者、第 5 類由 label 事件通知）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEADING='## 驗收結果：不通過'   # PR 作者不是 bot 帳號時改成 '## 驗收結果：不通過（作者非 bot，待人類處理）'
+{
+printf '%s\n\nhead SHA：%s\n\n' "$HEADING" "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+PR：#<PR 編號>
+驗收基準：<「✅ 需求共識」／基準較弱（沒有 grill 共識）：<來源>>
+
+不通過的項目：
+- <驗收條件 #2：缺了什麼>
+- <`flutter test` exit 1：失敗摘要>
+- <有衝突：需 rebase 到最新的 <base_ref 的值>>
+
+重做次數：本次後 <rework_after>（agent-failed <a> 次＋驗收不通過 <b> 次，含本次），上限 2
+
+處理：<已送 Request changes（綁上面這個 head SHA），主機端 pr-review-poller 會觸發 <Rick／Morty> 回原分支修正／PR 作者是 <login>，不是 bot 帳號，不自動送回，請人類處理／重做次數已達上限，已貼 needs-human，不再送回>
+EOF
+# 8d 續做時沒有跑測試、沒有 sensitive.tsv，這段自然不印
+if [ -s "$STATE/sensitive.tsv" ]; then
+  printf '\n⚠️ 本 PR 動到測試或測試指令：\n\n'
+  awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
+fi
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh issue comment "$NUM" --repo "$REPO" --body-file -
+gh api "repos/$REPO/issues/$NUM/comments" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | startswith(\"## 驗收結果：不通過\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
+```
+
+確認指令沒有輸出 → 立刻再貼一次；仍失敗 → 記進摘要。這則留言是冪等紀錄，也是
+重做次數的計數來源：送回路徑上漏貼的話，這個 SHA 有 Summer 的 Request changes
+卻沒有紀錄，下一輪步驟 3 的 R2 會走 8d 把它補上，不會重跑測試、不會再送第二則
+review。（作者不是 bot、或第 5 類那兩條路沒有 review，漏貼時下一輪會重驗一次、
+再貼一次。）
+
+**不改任何 label**：issue 留著 `agent-done`。作者在原分支補 commit 後 PR head
+會變，下一輪就會對新的 SHA 重驗。
+
+#### 8c. 無法驗證（測試環境）
+
+Summer 的環境跑不起來，作者修不了，所以**不送回、不算重做**，但也**絕不當成
+通過**。在 PR 貼一則（第一行逐字照抄；不用 `## 驗收結果：不通過`，那會被
+`backlog-triage` 算成一次重做）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '## 驗收結果：無法驗證（測試環境）\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+Summer 的測試環境跑不起來，這個 commit 沒有自跑測試的證據，不能算通過。
+
+驗收條件逐條比對：<全部 ✅／❓ 的摘要>
+
+跑不起來的原因：
+- <`flutter analyze` exit 127：flutter: command not found／base branch 的 CLAUDE.md 找不到任何測試指令／查不到 PR 的 base branch>
+
+需要人類處理（修好 Summer 的測試環境，或在 base branch 的 CLAUDE.md 寫明測試指令），之後在 Discord 指名重驗：「執行 acceptance-review skill <owner>/<repo>#<issue 編號>」。
+EOF
+if [ -s "$STATE/sensitive.tsv" ]; then
+  printf '\n⚠️ 本 PR 動到測試或測試指令：\n\n'
+  awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
+fi
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
+```
+
+用 8a 第 1 步同樣的確認指令確認貼上了（`startswith` 的標題換成這一則的）。不要
+自己 @ 人類：`human-notifier.sh` 會依這個標題通知。同一個 SHA 之後的排程掃描都會
+跳過；只有人類指名單張時才重驗（見步驟 3 的 R4）。
+
+#### 8c'. 無法驗證（基線紅）（Ruling R18）
+
+head 上失敗的指令，在 base branch 上也失敗（6c 第 3 類）：base 本身就是紅的，
+不是作者造成的，所以**不送回、不算重做**，也**絕不當成通過**。在 PR 貼一則
+（第一行逐字照抄；不用 `## 驗收結果：不通過`，那會被 `backlog-triage` 算成一次
+重做）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '## 驗收結果：無法驗證（基線紅）\n\nhead SHA：%s\n' "$(cat "$STATE/head_sha")"
+printf 'base：`%s` @ %s\n\n' "$(cat "$STATE/base_ref")" "$(cut -c1-7 "$STATE/base_sha")"
+cat <<'EOF'
+下列指令在 base branch 上就失敗，PR head 上也失敗。這不是本 PR 造成的，不算重做；但 head 沒有全綠的證據，不能算通過。
+
+驗收條件逐條比對：<全部 ✅／❓ 的摘要>
+EOF
+# 只列 base 與 head 都失敗的指令（base 紅、head 綠的是這張 PR 修好的，不列）
+while IFS="$(printf '\t')" read -r NAME RC CMD; do
+  [ "$RC" = 0 ] && continue
+  HRC=$(awk -F '\t' -v n="$NAME" '$1 == n {print $2}' "$STATE/tests.tsv")
+  [ "$HRC" = 0 ] && continue
+  printf '\n`%s` → base exit %s、head exit %s（base 的輸出結尾）\n\n~~~\n' "$CMD" "$RC" "$HRC"
+  tail -n 15 "$STATE/base-$NAME.log"
+  printf '~~~\n'
+done < "$STATE/base-tests.tsv"
+cat <<'EOF'
+
+需要人類處理：先讓 base branch 上這些指令恢復全綠（開 issue 或自己修）。修好後在 Discord 指名重驗「執行 acceptance-review skill <owner>/<repo>#<issue 編號>」；作者 rebase 之後 head SHA 變了，下一輪也會自動重驗。
+EOF
+if [ -s "$STATE/sensitive.tsv" ]; then
+  printf '\n⚠️ 本 PR 動到測試或測試指令：\n\n'
+  awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
+fi
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
+```
+
+用 8a 第 1 步同樣的確認指令確認貼上了（`startswith` 的標題換成這一則的）。不要
+自己 @ 人類：`human-notifier.sh` 會依這個標題通知。同一個 SHA 之後的排程掃描都會
+跳過（R4）；base 修好之後**不會自動重驗**同一個 head SHA——要人類指名，或作者
+rebase 讓 SHA 變。
+
+#### 8d. 續做送回（步驟 3 的 R2）
+
+上一輪在這個 SHA 送了 Request changes（送回已完成），之後的不通過留言沒貼成。
+**不重跑測試、不再送第二則 review、不觸發作者**（作者由 `pr-review-poller` 依那則
+review 觸發，跟這裡補不補記無關），只把紀錄補上：
+
+1. **算重做次數**（「重做次數」一節）。`rework=FAILED` → 本輪不寫，歸類「異常」。
+   `rework_after`（含這次還沒記下的不通過）≥ 2 → 照 8b 第 2 步的第 5 類那一條
+   處理（升級）；理論上不會發生，上一輪送回時就是 < 2。
+2. **取回上一輪的 review 內容**，拿它當不通過的項目：
+
+   ```bash
+   STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+   gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
+     --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$(cat "$STATE/head_sha")\") | \"\(.submitted_at)\n\(.body)\n----\""
+   ```
+
+3. （2026-10-17 移除原本的「先補觸發，只在作者還沒回應時」：觸發改由主機端
+   `pr-review-poller.sh` 看 review 決定，本 skill 不再發 Discord 觸發，R17。）
+4. **貼不通過留言**：用 8b 第 3 步的模板與確認指令，「不通過的項目」照抄
+   上面最新一則 review 的項目，「處理」寫「續做：上一輪已於 <review 時間> 送
+   Request changes，本輪補記不通過紀錄」。這一步把冪等紀錄與重做計數補回來。
+   失敗 → 記進摘要，下一輪 R2 會再試，並照下面第 5 步通報人類（每個 SHA 一次）。
+5. **補記失敗時通報人類一次**：補記一直失敗，R2 每輪都會成立，重做次數一直少算
+   一次，人類卻看不到原因。所以第 4 步失敗時，先查這個 SHA 通報過沒有：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
+  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | split(\"\n\")[0] | sub(\"^\\\\s+\"; \"\") | startswith(\"## 驗收紀錄補記失敗\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .id"); then
+  echo "already_notified=$(printf '%s\n' "$RAW" | grep -c .)"
+else
+  echo "already_notified=FAILED"
+fi
+```
+
+- `already_notified=0` → 在 PR 貼一則（第一行逐字照抄），再用上面同一個查詢確認
+  變成 1。不要自己 @ 人類：`human-notifier.sh` 會依這個標題通知一次。確認失敗就
+  記進摘要（下一輪 `already_notified` 仍是 0，會再貼一次）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+{
+printf '## 驗收紀錄補記失敗\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+cat <<'EOF'
+這個 SHA 上一輪已送 Request changes，但 issue #<issue 編號> 的「驗收結果：不通過」紀錄一直貼不上去（<錯誤摘要>）。
+
+在補上之前，本 skill 每輪都會再試一次（不會重送 review），重做次數在補上前少算一次。請人類確認 Summer 的 GitHub 權限或 API 狀態，必要時手動在 issue 補記。
+EOF
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
+```
+
+- `already_notified` ≥ 1 或 `FAILED` → 不再通報，只記進摘要。
+
+（2026-10-17 移除「順序為什麼是先觸發、後留言」：那段處理的是「本 skill 的觸發
+失敗、紀錄卻已貼上」會安靜卡住的問題。觸發改由 `pr-review-poller` 依 review 本身
+發送之後，紀錄貼不貼得上都不影響作者收不收得到。）
+
+#### 8e. 通報停滯（步驟 3 的 R3、R3'）
+
+上一輪送了 Request changes，PR head 卻沒有新的 commit。兩種原因：
+
+- **R3：作者已回應但未更新**——作者提問、反駁、認為超出範圍、
+  `pr-review-response` 失敗，或 `start` 超過 16 小時沒有下文（poller 的重送與升級
+  已經用完）。
+- **R3'：作者未回應**——review 送出超過 16 小時，作者連 `start` 都沒貼
+  （`pr-review-poller` 應已重送 3 次並 @ 過人類；這則是 poller 沒在跑時的備援）。
+
+**絕不重送**：同一個 SHA 再送一次，只會得到同樣的回應，而且每送一次都
+燒 Rick/Morty 的額度。改成讓人類知道，每個 SHA 最多通報 2 次（去重規則見步驟 3
+的「停滯通報的去重」：先報「作者未回應」、作者之後才貼標記時，還能再報一次「作者已
+回應但未更新」；同一種情況不重報）。（2026-10-18 改：原文「每個 SHA 只通報一次」與
+實作不符。）
+
+在 PR 貼一則（第一行逐字照抄）：
+
+```bash
+STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+HEAD_SHA=$(cat "$STATE/head_sha")
+# 跟 3a (4) 同一個查詢：這個 SHA 的停滯通報，一則一行（--paginate 時 jq 逐頁跑，不能在 jq 裡數）
+STALL_Q=".[] | select(.user.login == \"wman-pm\" and (.body | split(\"\n\")[0] | sub(\"^\\\\s+\"; \"\") | startswith(\"## 驗收停滯：PR head 未更新\")) and (.body | contains(\"head SHA：$HEAD_SHA\"))) | .html_url"
+# 先數貼之前有幾則：第 2 則通報時，第 1 則已經在了，只看「有沒有印出網址」會把貼失敗誤判成成功
+if BEFORE=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$STALL_Q"); then
+BEFORE_N=$(printf '%s\n' "$BEFORE" | grep -c .)
+{
+printf '## 驗收停滯：PR head 未更新\n\nhead SHA：%s\n\n' "$HEAD_SHA"
+cat <<'EOF'
+上一輪驗收不通過（issue #<issue 編號> 的「驗收結果：不通過」留言），已送 Request changes 給作者。
+
+停滯原因：<R3：作者已回應但未更新——pr-review-response 最新標記是 done／failed，或 start 已超過 16 小時，時間 <標記時間>／R3'：作者未回應——Request changes 於 <時間> 送出，超過 16 小時沒有任何 pr-review-response 標記（pr-review-poller 應已重送並通報；若沒收到它的通報，請確認 Mac mini 上 pr-review-poller 的 cron 有在跑）>。PR head 仍是上面這個 SHA，沒有新的 commit。
+
+本 skill 不會對同一個 SHA 再送回。需要人類看作者在 review thread 的回覆（或確認作者 bot 是否正常），決定要回覆作者、重新觸發、自己修改，還是關閉 PR。作者推了新 commit 之後，下一輪會自動重新驗收。
+EOF
+printf '\n---\n— By Summer (acceptance-review)\n'
+} | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
+# 重新數一次：剛好比貼之前多 1 則才算成功
+if AFTER=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$STALL_Q"); then
+  AFTER_N=$(printf '%s\n' "$AFTER" | grep -c .)
+  if [ "$AFTER_N" -eq $((BEFORE_N + 1)) ]; then
+    echo "8e 成功：$(printf '%s\n' "$AFTER" | grep . | tail -n 1)"
+  else
+    echo "8e 失敗：貼之前 ${BEFORE_N} 則、之後 ${AFTER_N} 則"
+  fi
+else
+  echo "8e 失敗：確認查詢失敗"
+fi
+else
+  echo "8e 失敗：貼之前的計數查詢失敗，沒有貼"
+fi
+```
+
+兩種原因共用同一個中性的第一行（3a 的 `stall_total`／`stall_after_mark` 只認它；
+`human-notifier.sh` 也靠它通知人類），原因寫在內文。**只有印出「8e 成功：<網址>」才算
+成功**：判斷方式是貼之前、之後各數一次這個 SHA 的停滯通報，之後必須剛好是之前加 1
+（2026-10-18 改：原本只看「確認查詢有沒有印出網址」，第 2 則通報時第 1 則已經在了，
+貼失敗也會印出網址、被誤判成成功）。不要自己 @ 人類；失敗 → 記進摘要，下一輪
+R3／R3' 會再試。
+
+## 重做次數
+
+**重做次數 ＝ issue timeline 裡 `labeled agent-failed` 的次數 ＋ `wman-pm` 貼過、
+第一行以 `## 驗收結果：不通過` 開頭的留言數**，和 `backlog-triage` 用同一個
+公式，用 GitHub 上已有的紀錄現算，不另存狀態。
+
+**整段放在同一次 Bash 呼叫裡跑**，開頭清空變數，不沿用上一張單的值：
+
+```bash
+REWORK=FAILED; FAILED_N=; REJECT_N=; EVENTS=
+# timeline 會分頁；--paginate 時 --jq 逐頁各跑一次，所以每個事件輸出一行再數行數
+if EVENTS=$(gh api "repos/$REPO/issues/$NUM/timeline" --paginate \
+  --jq '.[] | select(.event == "labeled" and .label.name == "agent-failed") | "\(.created_at) agent-failed"'); then
+  FAILED_N=$(printf '%s\n' "$EVENTS" | grep -c ' agent-failed$')
+  # 兩個查詢都成功才換成數字；任何一個失敗 REWORK 都維持 FAILED，不會被當成 0
+  if REJECT_N=$(gh issue view "$NUM" --repo "$REPO" --json comments \
+    --jq '[.comments[] | select(.author.login == "wman-pm" and (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "") | startswith("## 驗收結果：不通過")))] | length'); then
+    REWORK=$((FAILED_N + REJECT_N))
+  fi
+fi
+echo "rework=$REWORK failed=$FAILED_N reject=$REJECT_N"
+[ "$REWORK" != FAILED ] && echo "rework_after=$((REWORK + 1))"
+```
+
+**判斷用 `rework_after`（含本次這一次不通過）**：`rework_after ≥ 2` → 第 5 類，
+不送回。這和 `backlog-triage` 一致——它判斷時，觸發判斷的那次 `agent-failed`
+已經在 timeline 上、已經算進去；這裡觸發判斷的是本次不通過，它的留言還沒貼，
+所以要加 1。結果是：從沒失敗過的單，第一次驗收不通過會送回一次；第二次（或
+之前已經 `agent-failed` 過一次）就交給人類。
+
+## Discord
+
+**本 skill 不 @ 任何人**（2026-10-17 改，Ruling R17）：本 skill 由 usercron 在
+`summer-pm` 的 thread 裡跑，原本寫的「在 `bot-notify` 發整輪那一則 @ 人類」與
+「`pr-review` 觸發」實際上都送不到。要人類動手的事，一律靠 GitHub 上的固定標題
+（與 `needs-human` label）讓主機端 `human-notifier.sh` 通知；觸發作者靠 Request
+changes review 讓 `pr-review-poller.sh` 發。
+
+一天跑 13 次，**只報有變化的事**，沒變化就不要每小時重報一樣的清單。**本輪摘要**
+（回在觸發這一輪的地方，不帶任何 @）：本輪寫了什麼（通過、不通過、送回、續做送回、
+升級、無法驗證（測試環境／基線紅）、通報停滯）、異常（GraphQL 報錯、找不到 PR、
+多個候選 PR、步驟 3a 或重做次數查詢失敗、SHA 中途變動）、寫入失敗、**需要人類處理
+但不在 human-notifier 通知範圍內的事**（缺 `needs-human` label、gh 帳號不對——見
+「已知限制」），以及 **needs-human 已貼但沒有升級說明的
+issue（逐張點名）**。只有跳過的時候，回一行就好：「acceptance-review：本輪無新結果
+（agent-done <N> 張：已驗過 <a>、無法驗證（等環境修好）<b>、無法驗證（等 base 修好）
+<g>、停滯（已通報）<c>、作者處理 review 中 <d>、等作者回應（pr-review-poller 觸發中）
+<h>、等人類決定 <e>、待 GitHub 算合併狀態 <f>）」。各類分開計數，「無法驗證」「停滯」
+「等作者回應」不可併進「已驗過」——那幾種是在等人，不是驗完了。掃全部時兩個 repo
+都沒有 `agent-done`，也照這行回「agent-done 0 張」，不要完全不回。
+
+摘要 ≤ 2000 字。完整依據留在 GitHub 留言裡，不要把留言全文貼進 Discord。
 
 ## 鐵則
 
-- **只看規格符合度，不做 code review**——那是 Rick/Morty
-  `solo-feature-pipeline` 步驟 3（自我審查，派獨立 subagent）的職責。
-  不評論程式碼風格、效能、測試覆蓋率、命名，只回答「PR 做出來的東西是
-  不是當初 issue 定案的需求」。
-- **不滿足時只提議、不自行改 label**——`ready-for-agent` 是整條閉環的
-  人類閘門，見上方「送回開發」一節，要等人類明確點頭才動手。
-- **永不 approve、永不 merge**——見文首說明，這是角色分工的設計決定，
-  不只是帳號限制帶來的技術死結；即便未來
-  [wm4n/openab-ops#3](https://github.com/wm4n/openab-ops/issues/3)
-  的帳號分離落地、技術上能 approve 了，這條鐵則依然不變。
-- **冪等靠簽名，不靠 label**：不新增任何 label 當作「已驗收」的標記，
-  判斷依據就是 PR 上那則帶 `— By Summer (acceptance-review)` 簽名的
-  留言存不存在。
-- **掃不到東西一定要講出來，不能安靜結束**：掃全部時 `$TOTAL` = 0、
-  或任何一張落在「異常」分類（找不到對應 PR／找不到驗收條件／
-  GraphQL 查詢本身報錯），都要在 Discord 明確報出來（見「流程」
-  步驟 0、「Discord 摘要模板」）——標籤鏈雖然已由 persona §4b 補上，
-  但還沒實機驗證過，「這支 skill 一直沒東西可處理」跟「這條鏈沒在
-  運作」在 Discord 上長得一模一樣，只有把「掃到 0 張」本身當成一則
-  要發的訊息，才有機會被人類注意到。
+- **永不 approve、永不 merge**：自動 approve＋merge 暫緩，等人類決定是否開放
+  （2026-10-17，安全分類器以「Merge Without Review」擋下）。通過時只貼結果，
+  由 `human-notifier.sh` 通知人類 merge。Request changes 不是 approve，可以送。
+- **驗收要有可檢查的證據**：逐條依據加 Summer 自己在 PR head 跑的測試。測試
+  跑不起來、或拿不到測試指令，絕不當通過，也不跳過。
+- **head 失敗先對 base 跑同一組指令**（R18）：base 也紅歸「無法驗證（基線紅）」，
+  不算重做、絕不算通過；只有 base 綠、head 紅才算作者的測試失敗。
+- **測試指令從 base branch 讀**，不從 PR head 讀；PR 動到測試或測試指令要在結果
+  裡標出來。
+- **結果綁 head SHA**：每則結果都記 `head SHA：`，寫之前重讀一次 head，變了就
+  什麼都不貼；同一個 SHA 只驗一次。
+- **自動送回一定先算重做次數**：`rework_after ≥ 2` 一律改貼 `needs-human`，查詢
+  失敗一律不送回，沒有任何路徑可以跳過。
+- **送回 = 綁 head SHA 的 Request changes**（`gh api … -f commit_id=`）；觸發作者
+  是 `pr-review-poller` 的事。同一個 SHA 只送回一次：送回後紀錄沒貼成就續做（8d），
+  不重跑測試、不送第二則 review；作者回應了卻沒推新 commit 就通報停滯（8e），絕不重送。
+- **貼 `needs-human` 的順序固定：加 label → 留言（第一行
+  `## 需要人類決定（needs-human）`）**，@ 人類由 `human-notifier.sh` 依 label 事件發；
+  加 label 失敗就整個停手。已有升級留言卻沒有 label，是人類處理完移除的，**絕不為
+  同一件事重新加回**。
+- **帶 `needs-human` 的 issue 一律不動**。
+- **不改任何 label**：issue 留著 `agent-done`，不通過也不改；只有升級時加
+  `needs-human`。
+- **worktree 一定移除**，不在 base clone 上切分支。
+- **不在 Discord @ 任何人**（人類與 bot 都不 @）：觸發與通知都由主機端 poller 發。
+  固定標題的第一行逐字照抄，poller 才認得。
+- **每個寫入都用指令確認**，確認不了就當失敗，不往下做，記進摘要。
 - 白名單只有 `wm4n/chainbreak`、`wm4n/hangman` 兩個 repo。
 
 ## 不做什麼
 
-- **不做 code review**、不檢查程式碼風格、效能、測試覆蓋率——那些是
-  Rick/Morty 自我審查該做的事。
-- **不 approve、不 merge 任何 PR**。
-- **不自行貼／移除 `ready-for-agent`、`agent-done`**，除非人類已在
-  Discord 明確點頭送回開發（見「送回開發」）。
-- **不 clone repo、不建 worktree、不切分支**——`gh pr diff` 讀到的文字
-  diff 就夠。
-- **不逐張各發一則 Discord 訊息**——同一輪的結果彙整成一則摘要。
-- **不驗證 `agent-done` 標籤鏈本身有沒有正常運作**——label 怎麼貼定義
-  在 persona `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b
-  （`solo-feature-pipeline` 步驟 6「建 PR + 通知」本身不處理 label，
-  這段規則定義在呼叫端的 persona §4b），已於 2026-09-20 補齊，但還
-  沒有實機資料證實 Rick/Morty 每次都確實照做。本 skill 的責任只到
-  「鏈有沒有正常運作，讓掃描結果看得見」為止，不負責去改 persona 或
-  去查 Rick/Morty 那端有沒有漏做（見「流程」步驟 0、「鐵則」）。
+- **不 approve、不 merge 任何 PR**，也不關 PR、不刪分支。
+- **不做 code review**：不評論程式碼風格、效能、測試覆蓋率、命名。
+- **不改程式碼、不 push**：worktree 只拿來讀檔與跑測試。
+- **不貼、不移除任何流程 label**；只有升級時加 `needs-human`。
+- **不建 label**（缺 `needs-human` 時請人類建立）。
+- **不替人類送回**：作者不是 bot 帳號、或重做達上限時，交給人類決定。
+- **不逐張各發一則 Discord 摘要**；也不每小時重報沒有變化的事。
+- **不發 Discord 觸發、不 @ 人類**：那是 `pr-review-poller.sh`、`human-notifier.sh`
+  的事（R17）。
 
 ## 已知限制
 
-- **`agent-done` 標籤鏈已由 persona §4b 補上，但尚未實機驗證**：
-  `Rick-CLAUDE_v2.md`／`Morty-CLAUDE_v2.md` §4b（2026-09-20 新增）現在
-  明確要求成功路徑收尾三件事——PR 描述寫 `Closes #<issue 編號>`、在
-  issue 貼含 PR 連結的收尾留言、先加 `agent-done` 再移除
-  `agent-active`（`solo-feature-pipeline/SKILL.md` 步驟 6「建 PR +
-  通知」本身不處理 label，這段規則定義在呼叫端的 persona §4b）。這段
-  要求本身還沒有實機跑過，Rick/Morty 每次是否真的照做，目前沒有資料
-  可以確認。**「掃到 0 張」不再是預期中的正常狀態，而是一個值得注意
-  的訊號**：這段期間沒有 PR 走完到可以驗收的狀態，是其中一種合理
-  解釋；但如果連續多輪都是 0 張、而 `grill-me-done`／`ready-for-agent`
-  ／`agent-active` 這些 backlog 狀態明顯有在動（代表確實有單在走
-  開發），就該懷疑是標籤鏈沒被確實遵守，不能再預設「這是已知的正常
-  狀態」而略過不查。「流程」步驟 0 要求把「0 張」本身當成一則要發的
-  Discord 訊息，就是為了讓這個訊號被看見、被追蹤。
-- **usercron 排程尚未部署**：描述裡的「規劃中的 usercron 平日 10:30
-  觸發」目前只有規劃值（`sender_name`＝`SummerAcceptance`），實際要
-  寫進 Summer 容器內的 `/home/node/.openab/cronjob.toml` 才會生效
-  （見 `docs/superpowers/specs/2026-09-20-summer-pm-pipeline-design.md`
-  的觸發機制總表，`openab-ops` 的 `CRONJOB.md` 也註明這四個 job
-  尚未寫入 cronjob.toml、未部署）；部署前，這支 skill 只能靠人類在
-  Discord 主動要求觸發。
-- **簽名冪等不辨識「PR 有沒有更新過」**：PR 驗收後若又被推了新
-  commit，留言裡的簽名依然存在，下一輪掃描仍會判定「已驗收」而跳過。
-  想要求重新驗收，目前只能由人類指名單張參數
-  `<owner/repo>#<N>` 觸發，並在 PR 上額外說明要重新驗收——這裡沒有
-  「先刪舊留言再重跑」的自動機制，是刻意接受的限制。
-- **找 PR 現在主要依賴 persona §4b 新補上的 `Closes #N` 慣例，尚未
-  實機驗證**：GraphQL 查詢（步驟 1）能不能找到 PR，取決於 Rick/Morty
-  開 PR 時是否真的照 §4b（2026-09-20 才補上）在描述裡寫
-  `Closes #<issue 編號>`——這條要求本身還沒有實機跑過驗證。若沒有被
-  確實遵守，GraphQL 會查不到，退到 fallback 的留言比對；兩者都落空
-  才是真正的「異常」，這一點的容錯已經在步驟 1 設計進去了。
-- **Fallback 的留言比對仍是文字比對，不是原生關聯**：只在 GraphQL
-  找不到唯一的 `OPEN` PR 時才會用到，若 `solo-feature-pipeline` 步驟 6
-  收尾留言的措辭改了、不再包含可辨識的 PR 連結，這條路徑要跟著更新
-  ——這一點在標籤鏈缺口補齊、真正開始有留言可讀之後才有機會被驗證到。
-- **驗收發現不滿足、人類點頭送回開發後，舊 PR 不會自動關閉**，處理方式
-  留給人類決定。
-- **與 GitHub 帳號共用問題同源於
-  [wm4n/openab-ops#3](https://github.com/wm4n/openab-ops/issues/3)**：
-  待該 issue 的帳號分離方案落地後，approve 的技術限制才會解除，但如
-  「鐵則」所述，本 skill「永不 approve」本身是角色分工的設計決定，
-  不會因此改變。
+- **Summer 的測試環境還沒實機驗證過**：Summer 容器裝了 mise＋Flutter，但沒
+  確認過能在 PR checkout 裡跑完 `flutter test`。跑不起來時本 skill 走「無法驗證
+  （測試環境）」（human-notifier 會通知人類），不會誤判通過。
+- **送回與通知依賴 Mac mini 上的兩支 poller**（R17）：`pr-review-poller.sh` 沒在
+  跑，送回的 review 不會有人觸發作者——R3' 在 16 小時後貼停滯通報當備援；
+  `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
+  摘要（不帶 @）。上線 runbook 要先確認兩支 cron 都在跑。
+- **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @，人類不會被
+  叫）：缺 `needs-human` label、gh 帳號不是 `wman-pm`。前者是上線前置的問題，後者
+  發生時 Summer 什麼都寫不進 GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先
+  確認 label 與帳號。（作者不是 bot 帳號的不通過，fix round 1 起改用獨立標題、由
+  human-notifier 通知。）
+- **R3' 與 poller 升級可能各通知一次**：bot 一直沒醒時，`pr-review-poller` 約 15
+  小時後 @ 人類，本 skill 16 小時後再貼一則停滯通報（human-notifier 再通知一次）。
+  後者是 poller 沒在跑時的備援，重複一次可接受。
+- **作者在 review thread 回「問」或「反駁」之後要等人類**：本 skill 不回覆 review
+  thread；作者貼 `done` 但沒推 commit，R3 會貼停滯通報讓人類接手（見 spec「已知
+  限制」I3）。
+- **送回後不通過留言貼失敗**：當場重貼一次；仍失敗，下一輪步驟 3 的 R2 看到「這個
+  SHA 有 Summer 的 Request changes，之後卻沒有不通過紀錄」就走 8d 補記。R2 只看
+  **目前的** head SHA：作者若在下一輪執行之前就推了新 commit，那一次就沒有記到，
+  重做次數少算一次。下一輪最晚是一小時後；21:30 那一輪之後要等到隔天 09:30，
+  這段期間窗口最長。要連續兩次寫入失敗才會發生，接受。
+- **停滯靠 `pr-review-response` 的標記與時間判斷**：
+  - 作者有貼標記：`done`／`failed`，或 `start` 超過 16 小時 → R3 通報「作者已回應
+    但未更新」。`start` 在 5–16 小時之間時不通報：`pr-review-poller` 正在重送，摘要
+    計入「等作者回應」。
+  - 作者完全沒有標記：review 送出超過 16 小時 → R3' 通報「作者未回應」。作者若
+    其實回應了、只是沒走 `pr-review-response`（例如在 PR 上手動回覆、沒有標記），
+    本 skill 分不出來，一樣報成「作者未回應」，人類點進 PR 就看得到實情。
+  - 每個 SHA 最多通報 2 則：R3' 先報過、作者之後才貼標記時，R3 還能再報一次；
+    同一種情況不重報。
+  - 「新的 start」的 5 小時對齊 `pr-review-poller` 的租約，「逾時的 start」的 16
+    小時大於 poller 的 3 次重送；`pr-review-response` 自己的並行防護仍寫 2 小時（那支
+    skill 不在本次改動範圍），只影響人類手動重觸發時能不能並行，不影響這裡的判斷。
+- **R2 續做與作者的 `start` 標記**：R2 排在 R1 前面。作者在 Summer 貼不通過留言
+  之前就開始處理時，R2 先成立，8d 只補記、不碰作者；之後作者推了新 commit 就走
+  正常驗收，沒推就在 `done`／`failed` 之後由 R3 通報停滯。
+- **PR 自己改了 `pubspec.yaml` 等設定，導致 `flutter pub get` 失敗**：目前一律歸為
+  環境問題（6c 的前置指令規則），走「無法驗證（測試環境）」通知人類，**不會送回**給
+  作者——Summer 分不清是 PR 改壞了依賴，還是自己的網路／快取壞了。人類看到再決定。
+- **基線紅會蓋掉 PR 自己帶進的新失敗**（R18）：base 本來就紅、PR 又讓同一個指令
+  多壞了別的地方，兩邊都 exit ≠ 0，一樣歸成基線紅——PR 造成的回歸被蓋掉、不會送回。
+  但它**不會通過**，human-notifier 會通知人類；base 修好後重驗就看得出來。
+- **基線紅之後 base 修好，同一個 head SHA 不會自動重驗**（R18）：R4 對
+  `## 驗收結果：無法驗證（基線紅）` 只在人類指名時重驗；作者 rebase 讓 SHA 變了，
+  下一輪也會重驗。
+- **通過後 issue 那行連結貼失敗不會補**：PR 上的結果已經在，下一輪冪等跳過。
+- **第 5 類升級後，人類移除 label、PR head 沒變**：本 skill 一直跳過這個 SHA，
+  後續（送回、自己修、關 PR）完全由人類決定。
+- **升級在「label 之後、留言之前」被中斷**：`needs-human` 已在身上，poller 都會
+  跳過；`human-notifier.sh` 依 label 事件照樣 @ 人類（訊息註明「尚無說明留言」）。
+  只是 issue 上缺說明留言；不補做（不知道當初卡在什麼），步驟 1 會在摘要點名列出。
+  第 5 類這時也還沒貼不通過留言，人類移除 label 後同一個 SHA 會再驗一次、再升級
+  一次，機率極低，接受。
+- **找 PR 依賴 `Closes #N`**：沒寫時退到留言比對，兩者都落空才是「異常」。
+- **usercron 必須設定 `timezone = "Asia/Taipei"`**：`30 9-21 * * *` 要以台北時間
+  解讀。`timezone` 不設的話預設是 UTC（`CRONJOB.md` 欄位表），整個排程差 8 小時，
+  會跑在台北時間 17:30–05:30。部署時在 `cronjob.toml` 確認這一項（時程與設定以
+  `openab-ops` 的 `CRONJOB.md` 為準）。（2026-10-17 起本 skill 不再依賴「09 點那
+  一輪」，見預檢段落的說明。）
