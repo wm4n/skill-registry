@@ -699,10 +699,12 @@ cat "$STATE/sensitive.tsv"
 「⚠️ 本 PR 動到測試或測試指令」，逐行列出（`D` 開頭的標明「刪除」）。這不會讓
 結果變成不通過——改測試、改設定本來就常見——只是留下紀錄。2026-10-23 起 merge 由
 merge-poller 自動執行（R21）。merge-poller 不讀這段留言，而是自己依 PR 的 files 清單
-擋下削弱測試的情況（R24）：刪除測試檔、把測試檔改名成非測試檔、修改 `CLAUDE.md`／
+擋下削弱測試的情況（R24'）：刪除測試檔、把測試檔改名成非測試檔、修改
 `analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／`jest.config.*`／
-`vitest.config.*`，命中就不 merge、升級 `needs-human`。一般的新增或修改測試不擋。這段
-列表給人類看是哪些檔、事後稽核用。
+`vitest.config.*`（有改就擋），以及 `CLAUDE.md`／`AGENTS.md` 的 patch `+`／`-` 行出現
+測試或檢查指令字樣（`flutter test`、`pytest`、`測試指令` 這類，不分大小寫；只改設計
+紀錄不擋）。命中就不 merge、升級 `needs-human`；GitHub 沒給 patch 的文字檔也擋，二進位
+asset 不擋。一般的新增或修改測試不擋。這段列表給人類看是哪些檔、事後稽核用。
 （2026-10-17 版本寫的是「人類 merge 前要看得到」，那時 merge 由人類按。）
 
 **逐一執行**：每個指令都照這個模式跑，把 exit code 與 log 存進狀態目錄：
@@ -1337,12 +1339,18 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   所有含 ❓ 的 PR 會讓 UI 類的工作全部回到等人類。通過的條件沒有改（spec B2「其他內容
   不變」），所以有 ❓ 的 PR 一樣會被自動 merge；每日 merge 摘要會標出含 ❓ 的 merge，
   由人類事後實機確認。
-- **削弱測試由 merge-poller 擋，不由本 skill 擋**（R24）：刪除測試檔、測試檔改名成
-  非測試檔、修改 `CLAUDE.md`／`analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／
-  `jest.config.*`／`vitest.config.*` 會被 merge-poller 依 files 清單升級 `needs-human`。
-  一般的新增或修改測試不擋——測試內容改弱（例如把 assert 改鬆）比對不出來，只能靠
-  6b 的列表讓人類事後看。只改 `CLAUDE.md` 文件的 PR 也會被擋，誤擋由人類移除 label
-  放行。
+- **削弱測試由 merge-poller 擋，不由本 skill 擋**（R24'）：
+  - 有改就擋：刪除測試檔、測試檔改名成非測試檔、修改 `analysis_options.yaml`／
+    `dart_test.yaml`／`pytest.ini`／`jest.config.*`／`vitest.config.*`。
+  - `CLAUDE.md`／`AGENTS.md` 只在 patch 的 `+`／`-` 行出現測試或檢查指令字樣時才擋：
+    `flutter test`、`flutter analyze`、`dart test`、`dart analyze`、`npm test`、
+    `npm run test`、`pnpm test`、`yarn test`、`pytest`、`unittest`、`node --test`、
+    `jest`、`vitest`、`make test`、`測試指令`、`test command`（不分大小寫）。只改設計
+    紀錄不擋。
+  - GitHub 沒提供 patch 的文字檔也擋；二進位 asset 不擋。
+  - 命中就升級 `needs-human`，誤擋由人類移除 label 放行。一般的新增或修改測試不擋——
+    測試內容改弱（例如把 assert 改鬆）、或在 `CLAUDE.md` 用不在清單裡的寫法改掉測試
+    指令，都比對不出來，只能靠 6b 的列表讓人類事後看。
 - **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @，人類不會被
   叫）：缺 `needs-human` label、gh 帳號不是 `wman-pm`。前者是上線前置的問題，後者
   發生時 Summer 什麼都寫不進 GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先
