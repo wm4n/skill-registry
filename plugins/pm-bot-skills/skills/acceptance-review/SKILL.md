@@ -698,8 +698,11 @@ cat "$STATE/sensitive.tsv"
 有輸出 → 在這張的結果留言（通過、不通過、無法驗證都一樣）加一段
 「⚠️ 本 PR 動到測試或測試指令」，逐行列出（`D` 開頭的標明「刪除」）。這不會讓
 結果變成不通過——改測試、改設定本來就常見——只是留下紀錄。2026-10-23 起 merge 由
-merge-poller 自動執行（R21），merge-poller **不讀這段**，所以它不會在 merge 前攔下
-任何東西：它是給人類事後稽核（例如熔斷後找要 revert 哪張）用的，不是 merge 閘門。
+merge-poller 自動執行（R21）。merge-poller 不讀這段留言，而是自己依 PR 的 files 清單
+擋下削弱測試的情況（R24）：刪除測試檔、把測試檔改名成非測試檔、修改 `CLAUDE.md`／
+`analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／`jest.config.*`／
+`vitest.config.*`，命中就不 merge、升級 `needs-human`。一般的新增或修改測試不擋。這段
+列表給人類看是哪些檔、事後稽核用。
 （2026-10-17 版本寫的是「人類 merge 前要看得到」，那時 merge 由人類按。）
 
 **逐一執行**：每個指令都照這個模式跑，把 exit code 與 log 存進狀態目錄：
@@ -871,7 +874,7 @@ cat <<'EOF'
 EOF
 # PR 動到測試或測試指令（6b 產生的清單），有才印
 if [ -s "$STATE/sensitive.tsv" ]; then
-  printf '\n### ⚠️ 本 PR 動到測試或測試指令（紀錄用，自動 merge 不會等人類確認）\n\n'
+  printf '\n### ⚠️ 本 PR 動到測試或測試指令（刪除或改名測試檔、改測試設定會由 merge-poller 擋下）\n\n'
   awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
 fi
 printf '\n### 測試（指令來源：%s；在上面那個 head SHA 的乾淨 checkout 執行）\n' "$( [ -s "$STATE/test_source" ] && cat "$STATE/test_source" || printf '未知' )"
@@ -888,7 +891,7 @@ if gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
 fi
 cat <<'EOF'
 
-本 skill 不 approve、不 merge：主機端 merge-poller 會依本結果與上面的 head SHA 自動 squash merge。<有 ❓ 時加一句：標 ❓ 的條目需要人類實機確認，自動 merge 不會等這一步；請在 merge 後實機確認，有問題再開 issue 或 revert。>
+本 skill 不 approve、不 merge：主機端 merge-poller 會依本結果與上面的 head SHA 自動 squash merge。<有 ❓ 時加一句：標 ❓ 的條目需要人類實機確認，自動 merge 不會等這一步；每日 merge 摘要會標出含 ❓ 的 merge，請在 merge 後實機確認，有問題再開 issue 或 revert。>
 EOF
 printf '\n---\n— By Summer (acceptance-review)\n'
 } | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
@@ -1321,17 +1324,25 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
 - **Summer 的測試環境還沒實機驗證過**：Summer 容器裝了 mise＋Flutter，但沒
   確認過能在 PR checkout 裡跑完 `flutter test`。跑不起來時本 skill 走「無法驗證
   （測試環境）」（human-notifier 會通知人類），不會誤判通過。
-- **送回與通知依賴 Mac mini 上的兩支 poller**（R17）：`pr-review-poller.sh` 沒在
-  跑，送回的 review 不會有人觸發作者——R3' 在 16 小時後貼停滯通報當備援；
-  `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
-  摘要（不帶 @）。上線 runbook 要先確認兩支 cron 都在跑。
-- **merge 依賴 Mac mini 上的 `merge-poller.sh`**（R21）：它沒在跑（包括回滾拿掉
-  cron 之後），通過的 PR 就停在 open；`human-notifier.sh` 會在通過留言超過 12 小時後
-  @ 人類一次（pass-stale），由人類自己 merge。
-- **❓ 條目與「動到測試或測試指令」不擋自動 merge**（2026-10-23 起）：這兩項原本是
-  寫給「人類按 merge 前」看的，merge-poller 只讀首行與 `head SHA：`，不讀這兩段。
-  通過的條件沒有改（spec B2「其他內容不變」），所以有 ❓ 或動到測試的 PR 一樣會被自動
-  merge，要靠人類事後看結果留言。
+- **送回、通知與 merge 依賴 Mac mini 上的三支 poller**（R17、R21）：
+  - `pr-review-poller.sh` 沒在跑，送回的 review 不會有人觸發作者——R3' 在 16 小時後
+    貼停滯通報當備援。
+  - `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
+    摘要（不帶 @）。
+  - `merge-poller.sh` 沒在跑（包括回滾拿掉 cron 之後），通過的 PR 就停在 open；
+    `human-notifier.sh` 會在通過留言超過 12 小時後 @ 人類一次（pass-stale），由人類
+    自己 merge。
+  上線 runbook 要先確認三支 cron 都在跑。
+- **❓ 條目不擋自動 merge**（2026-10-23 起，R24）：❓ 是只能在實機確認的條目，擋下
+  所有含 ❓ 的 PR 會讓 UI 類的工作全部回到等人類。通過的條件沒有改（spec B2「其他內容
+  不變」），所以有 ❓ 的 PR 一樣會被自動 merge；每日 merge 摘要會標出含 ❓ 的 merge，
+  由人類事後實機確認。
+- **削弱測試由 merge-poller 擋，不由本 skill 擋**（R24）：刪除測試檔、測試檔改名成
+  非測試檔、修改 `CLAUDE.md`／`analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／
+  `jest.config.*`／`vitest.config.*` 會被 merge-poller 依 files 清單升級 `needs-human`。
+  一般的新增或修改測試不擋——測試內容改弱（例如把 assert 改鬆）比對不出來，只能靠
+  6b 的列表讓人類事後看。只改 `CLAUDE.md` 文件的 PR 也會被擋，誤擋由人類移除 label
+  放行。
 - **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @，人類不會被
   叫）：缺 `needs-human` label、gh 帳號不是 `wman-pm`。前者是上線前置的問題，後者
   發生時 Summer 什麼都寫不進 GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先

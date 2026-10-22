@@ -6,10 +6,12 @@ description: >-
   被人類回覆之後的兩件事。revise：人類（wm4n）送了 Request changes，照意見修改
   提案檔、push 回原分支、在 PR 留言說明改了什麼。materialize：提案已被 merge，
   依人類 approve 時選的方案（沒選就用提案標「建議」的方案）開 issue，帶 grill-me
-  與 spec-only，內文連回提案檔。由主機端 poller 觸發，訊息「執行 direction-proposal
-  skill，參數：revise <owner>/<repo>#<pr>」或「執行 direction-proposal skill，參數：
-  materialize <owner>/<repo>#<pr>」；人類在 Discord 要 Summer 改提案或把核准的提案
-  開成 issue 時也觸發。不 merge、不 approve，除了 needs-human 不碰任何 label。
+  與 spec-only，內文連回提案檔。由主機端 poller 觸發，訊息是
+  「執行 direction-proposal skill，參數：revise <owner>/<repo>#<pr>」或
+  「執行 direction-proposal skill，參數：materialize <owner>/<repo>#<pr>」；
+  人類在 Discord 要 Summer 改提案或把核准的提案開成 issue 時也觸發。不 merge、
+  不 approve，除了 needs-human 不碰任何 label（本輪剛開的 issue 補 grill-me／
+  spec-only 除外）。
 ---
 
 # Direction Proposal
@@ -95,11 +97,12 @@ mkdir -p "$STATE"
 
 ```bash
 # （開頭照「參數與共同預檢」重設變數）
-OK=yes; REV=; MARK=
-# wm4n 最新一則 Request changes：<時間>\t<id>\t<commit_id>
+OK=yes; REV=; APR=; MARK=
+# wm4n 最新一則 Request changes 與最新一則 Approve：<時間>\t<id>\t<commit_id>\t<state>
 if RAW=$(gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
-     --jq '.[] | select(.user.login == "wm4n" and .state == "CHANGES_REQUESTED") | "\(.submitted_at)\t\(.id)\t\(.commit_id)"'); then
-  REV=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+     --jq '.[] | select(.user.login == "wm4n" and (.state == "CHANGES_REQUESTED" or .state == "APPROVED")) | "\(.submitted_at)\t\(.id)\t\(.commit_id)\t\(.state)"'); then
+  REV=$(printf '%s\n' "$RAW" | awk -F '\t' '$4 == "CHANGES_REQUESTED"' | sort | tail -n 1)
+  APR=$(printf '%s\n' "$RAW" | awk -F '\t' '$4 == "APPROVED"' | sort | tail -n 1)
 else OK=no; fi
 # 本 skill 最新的標記：<時間>\t<start|done|failed>\t<距今秒數>\t<已處理 review id，沒有就空白>
 if RAW=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[] | select(.user.login == "wman-pm")
@@ -114,6 +117,7 @@ HEAD_SHA=$(sed -n 3p "$STATE/pr.txt")
 printf '%s' "$REV" > "$STATE/review"
 echo "ok=$OK state=$(sed -n 1p "$STATE/pr.txt") head=$HEAD_SHA"
 echo "review=$REV"
+echo "approve=$APR"
 echo "mark=$MARK"
 ```
 
@@ -125,12 +129,14 @@ echo "mark=$MARK"
 4. `marks.tsv` 裡有 `done` 標記的「已處理 review」等於這則的 `id` → 已處理過，結束。
 5. review 的 `commit_id` 不等於目前 head → review 之後分支已經有新 commit，也就是改過
    了，結束。
-6. 最新標記是 `start`、晚於 review、而且距今不到 15000 秒（250 分鐘，主機端
+6. `approve` 有值、時間晚於 review，而且它的 `commit_id`（第 3 欄）等於目前 head →
+   人類看過之後改成核准了，不再修改，結束（merge-poller 會依這則 Approve merge）。
+7. 最新標記是 `start`、晚於 review、而且距今不到 15000 秒（250 分鐘，主機端
    `SUMMER_ACK_MIN` 的預設值）→ 另一輪還在處理，結束。
-7. 以上都不符合 → 往下做。`failed` 標記不擋：人類排除原因後手動重觸發，這裡要能
+8. 以上都不符合 → 往下做。`failed` 標記不擋：人類排除原因後手動重觸發，這裡要能
    重做同一則 review。
 
-步驟 1–6 的「結束」都不貼任何標記。
+步驟 1–7 的「結束」都不貼任何標記。
 
 ### R2. 貼 start 標記
 
@@ -341,36 +347,70 @@ gh api "repos/$REPO/pulls/$PR/reviews" --paginate \
 echo "approval=$(cat "$STATE/approval")"
 ```
 
-讀 approve 內文寫了哪個方案（全形字母先轉半形，同一個字母只算一次）：
+接著在同一次 Bash 呼叫裡讀三件事：approve 內文選了哪個方案；之前有沒有為「方案不明確」
+升級過（M5）；升級過的話，人類在升級之後怎麼說。讀方案的 jq 只有 `PLAN_JQ` 這一份：
+全形字母先轉半形；每個「方案」前先斷行，「方案A方案B」才不會漏抓第二個；同一個字母
+只算一次。
 
 ```bash
 # （開頭照「參數與共同預檢」重設變數）
+PLAN_JQ='explode
+  | map(if . >= 65313 and . <= 65338 then . - 65248 elif . >= 65345 and . <= 65370 then . - 65248 else . end)
+  | implode | gsub("方案"; "\n方案")
+  | [match("方案[\t \u00a0\u3000]*([A-Za-z])([^A-Za-z]|$)"; "g") | .captures[0].string | ascii_upcase] | unique
+  | if length == 0 then "NONE" elif length == 1 then "ONE \(.[0])" else "MULTI \(join(","))" end'
+# (1) approve 內文
 AID=$(cut -f2 "$STATE/approval")
 if [ -n "$AID" ]; then
   gh api "repos/$REPO/pulls/$PR/reviews/$AID" --jq '.body // ""' > "$STATE/approval_body"
-  gh api "repos/$REPO/pulls/$PR/reviews/$AID" --jq '
-    (.body // "") | explode
-    | map(if . >= 65313 and . <= 65338 then . - 65248 elif . >= 65345 and . <= 65370 then . - 65248 else . end)
-    | implode
-    | [match("方案[\t \u00a0\u3000]*([A-Za-z])([^A-Za-z]|$)"; "g") | .captures[0].string | ascii_upcase] | unique
-    | if length == 0 then "NONE" elif length == 1 then "ONE \(.[0])" else "MULTI \(join(","))" end'
+  echo "approve_plan=$(gh api "repos/$REPO/pulls/$PR/reviews/$AID" --jq "(.body // \"\") | $PLAN_JQ")"
 else
-  : > "$STATE/approval_body"; echo "NONE"
+  : > "$STATE/approval_body"; echo "approve_plan=NONE"
+fi
+# (2) 本 skill 之前的「方案不明確」升級：wman-pm 的 PR 留言，首行與第二行去掉前後空白後全等
+: > "$STATE/human_body"
+if RAW=$(gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[] | select(.user.login == "wman-pm")
+     | ((.body // "") | split("\n")) as $l
+     | select((($l[0] // "") | gsub("^[\t \u00a0\u3000]+|[\t\r \u00a0\u3000]+$"; "")) == "## 需要人類決定（needs-human）"
+          and (($l[1] // "") | gsub("^[\t \u00a0\u3000]+|[\t\r \u00a0\u3000]+$"; "")) == "原因：提案核准的方案不明確")
+     | .created_at'); then
+  ESC_AT=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
+else
+  ESC_AT=CHECK_FAILED
+fi
+echo "esc_at=$ESC_AT"
+# (3) 升級過的話：升級之後 wm4n 最新一則 PR 留言選了哪個方案
+if [ -n "$ESC_AT" ] && [ "$ESC_AT" != CHECK_FAILED ]; then
+  if RAW=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
+       --jq ".[] | select(.user.login == \"wm4n\" and .created_at > \"$ESC_AT\") | \"\(.created_at)\t\(.id)\""); then
+    CID=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1 | cut -f2)
+    if [ -n "$CID" ]; then
+      gh api "repos/$REPO/issues/comments/$CID" --jq '.body // ""' > "$STATE/human_body"
+      echo "human_plan=$(gh api "repos/$REPO/issues/comments/$CID" --jq "(.body // \"\") | $PLAN_JQ")"
+    else
+      echo "human_plan=NONE"
+    fi
+  else
+    echo "human_plan=CHECK_FAILED"
+  fi
 fi
 ```
 
-依下表決定選定方案，第一個符合的就採用：
+依下表決定選定方案，第一個符合的就採用。前兩列是「絕不重新加回 `needs-human`」的
+機械保護：升級過一次，之後不論人類說了什麼，本 skill 都不會再升級第二次。
 
 | 情況 | 選定方案 |
 | --- | --- |
+| `esc_at=CHECK_FAILED` | 結束，不開 issue、不升級（查不到就可能重複升級），Discord 回報 |
+| `esc_at` 有時間（升級過、label 已被人類移除；label 還在的話預檢 3 已經結束） | 只看 `human_plan`：`ONE X`、X 在 `letters` 裡、而且人類肯定地選它 → 方案 X（人類在升級後指定）。其他（`NONE`、`MULTI`、`CHECK_FAILED`、否定或比較）→ 結束，**不再升級**，Discord 回報請人類在 PR 留言寫「方案 X」後再觸發一次，或自己開 issue |
 | `letters` 是空的（提案只有一個方案） | 唯一方案 |
-| `ONE X`，X 在 `letters` 裡，而且內文是**肯定地選它**（不是「方案 A 不行」「比方案 A 好的那個」這類否定、比較或排除） | 方案 X（人類指定） |
-| `NONE`，`recommended` 剛好一個字母，而且 approve 內文沒有用別的說法指定方案（例如「第二個」「選比較便宜的」） | `recommended` 那個（人類沒指定，依建議） |
+| `approve_plan` 是 `ONE X`，X 在 `letters` 裡，而且內文是**肯定地選它**（不是「方案 A 不行」「比方案 A 好的那個」這類否定、比較或排除） | 方案 X（人類指定） |
+| `approve_plan` 是 `NONE`，`recommended` 剛好一個字母，而且 approve 內文沒有用別的說法指定方案（例如「第二個」「選比較便宜的」） | `recommended` 那個（人類沒指定，依建議） |
 | 其他（`MULTI`、X 不在提案裡、提到 X 卻是否定或比較、`recommended` 不是剛好一個、內文用別的說法指定了方案） | **不明確** → M5 |
 
-沒有任何 wm4n 的 Approve（人類自己按了 merge）也照「`NONE`」那一列處理：merge 本身就是
-核准方向。approve 內文不論選了哪一列，都原文抄進 issue（M4），grill 時才看得到人類的
-補充。
+沒有任何 wm4n 的 Approve（人類自己按了 merge）也照「`approve_plan` 是 `NONE`」那一列
+處理：merge 本身就是核准方向。approve 內文（以及升級後人類的那則留言）不論選了哪一列，
+都原文抄進 issue（M4），grill 時才看得到人類的補充。
 
 ### M4. 開 issue
 
@@ -401,9 +441,12 @@ cat <<'EOF'
 EOF
 printf '\n提案檔：%s\n' "$FILE"
 printf '提案 PR：%s\n' "$PR_URL"
-printf '選定方案：%s\n' '<唯一方案／方案 X（人類指定）／方案 X（人類沒指定，依提案的建議方案）>'
+printf '選定方案：%s\n' '<唯一方案／方案 X（人類指定）／方案 X（人類在升級後指定）／方案 X（人類沒指定，依提案的建議方案）>'
 printf '人類核准時的留言：\n\n'
 if [ -s "$STATE/approval_body" ]; then sed 's/^/> /' "$STATE/approval_body"; else printf '（無）\n'; fi
+if [ -s "$STATE/human_body" ]; then
+  printf '\n人類在「方案不明確」升級後的留言：\n\n'; sed 's/^/> /' "$STATE/human_body"
+fi
 printf '\n---\n— By Summer\n'
 } > "$STATE/issue_body.md"
 grep -qF "提案檔：$FILE" "$STATE/issue_body.md" && echo "BODY_OK"
@@ -457,10 +500,10 @@ pm-bot skill 的 R15 順序）：
    `— By Summer (direction-proposal)`。
 3. 不 @ 人類：通知由主機端 human-notifier 依 label 事件發。
 
-**人類處理完之後**（PR 上有上面那則升級留言、`needs-human` 已被移除）：用 M3 那段
-jq 讀**升級留言之後** `wm4n` 最新一則 PR 留言（`gh api "repos/$REPO/issues/$PR/comments"`），
-`ONE X` 而且 X 在提案裡 → 選方案 X（記為「人類指定」），回到 M4。還是不明確 → 不再升級
-（**絕不重新加回** `needs-human`），Discord 回報請人類直接開 issue。
+**人類處理完之後**（PR 上有上面那則升級留言、`needs-human` 已被移除）：下一次觸發時，
+M3 第二段的 (2) 會找到這則升級留言（首行與第二行全等比對），(3) 讀它之後 `wm4n` 最新一則
+PR 留言的方案，決策表前兩列接手：人類選了提案裡的方案 X → 回到 M4；還是讀不出來 → 結束，
+**絕不重新加回** `needs-human`，Discord 回報請人類直接開 issue。
 
 ## 鐵則
 

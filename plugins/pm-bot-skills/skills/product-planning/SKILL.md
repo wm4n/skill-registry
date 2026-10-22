@@ -454,7 +454,15 @@ printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' && [ "${#SLUG}" -le 40
 印出 `NAME_BAD` 就換一個 slug。之後每次 Bash 呼叫開頭，都用這裡印出的值逐字重設
 `REPO`、`D`、`SLUG`（`D` 不要重新取日期：跨過午夜會變），再用下面同一組算式得出其他
 變數。**補開做到一半的提案**（步驟 2 最後一段）時，`D`、`SLUG` 從既有分支名
-`proposal/<D>-<SLUG>` 拆出來，跳過第 2–4 步，直接做第 5 步。
+`proposal/<D>-<SLUG>` 拆出來，跳過第 2–4 步，先讀回分支上的提案檔，第 5 步的摘要、方案
+與標題才有東西可寫，再直接做第 5 步：
+
+```bash
+# （先照下面那組算式設好 BRANCH、FILE）
+gh api -H "Accept: application/vnd.github.raw+json" "repos/$REPO/contents/$FILE?ref=$BRANCH"
+```
+
+讀不到（404 或其他錯誤）→ 這張本輪不補，記進摘要。
 
 ```bash
 OWNER="${REPO%%/*}"; REPO_NAME="${REPO#*/}"
