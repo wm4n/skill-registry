@@ -309,7 +309,13 @@ head SHA** 上有 `wman-pm` 的 `CHANGES_REQUESTED` review（Ruling R19，2026-1
 `acceptance-review` 送回時 label 留著 `agent-done`，但 Rick／Morty 會被
 `pr-review-poller` 叫回去補 commit，照樣佔一隻 bot。不算它的話，送回的單一多，
 放行就會超過兩隻 bot 的實際名額。作者推了新 commit（head 變了）之後就不再算，
-等下一次驗收決定。
+等下一次驗收決定。主機端 merge-poller 因為與 main 衝突而送的 Request changes（首行
+`## 自動 merge 受阻：與 main 衝突`）也是 `wman-pm` 送的，一樣會叫作者回來解衝突、
+佔一隻 bot，所以照算（2026-10-23）。
+
+**Summer 的提案 PR 不算**（2026-10-23，R22）：作者 `wman-pm`、分支 `proposal/*` 的
+PR 是方向提案，沒有對應的 issue、也不佔開發 bot。它本來就不准寫 `Closes #`，
+`closingIssuesReferences` 是空的；下面的 jq 仍明確把它濾掉，不靠「剛好沒有連結」。
 
 ```bash
 WIP=0
@@ -323,8 +329,8 @@ for R in wm4n/chainbreak wm4n/hangman; do
   # R19：agent-done、沒有 needs-human，而且對應 PR 的目前 head 上有 wman-pm 的 Request changes
   if DONE_ISSUES=$(gh issue list --repo "$R" --state open --label agent-done --limit 200 --json number,labels \
        --jq '.[] | select(all(.labels[]; .name != "needs-human")) | .number') \
-     && PRS=$(gh pr list --repo "$R" --state open --limit 200 --json number,headRefOid,closingIssuesReferences \
-       --jq '.[] | "\(.number) \(.headRefOid) \([.closingIssuesReferences[].number] | join(","))"'); then
+     && PRS=$(gh pr list --repo "$R" --state open --limit 200 --json number,headRefOid,headRefName,author,closingIssuesReferences \
+       --jq '.[] | select(((.author.login // "") == "wman-pm" and ((.headRefName // "") | startswith("proposal/"))) | not) | "\(.number) \(.headRefOid) \([.closingIssuesReferences[].number] | join(","))"'); then
     REWORKING=
     while read -r PN SHA CLOSES; do
       [ -z "$PN" ] && continue
@@ -939,8 +945,9 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 
 ## 不做什麼
 
-- **不 approve、不 merge 任何 PR**——本 skill 完全不碰 PR，那是
-  `acceptance-review` 掃 `agent-done` 之後的事。
+- **不 approve、不 merge 任何 PR**——本 skill 完全不碰 PR：驗收是
+  `acceptance-review` 掃 `agent-done` 之後的事，merge 是主機端 `merge-poller.sh` 的事
+  （2026-10-23 R21）。
 - **不建 worktree、不切分支、不改程式碼**——只讀 issue、留言與 timeline，
   改 Summer 自己開的 issue 的描述文字、在人類開的 issue body 末尾附加修正段，
   貼 issue 留言與 Discord 訊息，以及放行與升級的 label 操作。
