@@ -2,30 +2,42 @@
 name: product-planning
 argument-hint: "[--property chainbreak|hangman]"
 description: >-
-  規劃下一步該做什麼、開需求 issue 或收養人類開的 issue。需求來源有四個，
+  規劃下一步該做什麼：Summer 自己的新想法開成提案 PR 讓人類審方向，或收養
+  人類開的 issue。需求來源有四個，
   GA4 數據只是其中一個可選的加分項（沒設定 GA4 也照樣有產出）：產品 repo
   自己的文件（README／CLAUDE.md／docs）、人類開的無流程 label backlog、
   卡在 ready-for-human 的單，以及（有設定時）GA4。由 usercron 定期
   觸發（訊息「執行 product-planning skill」，sender_name＝
   SummerPlanning，時程以 CRONJOB.md 為準），或人類在 Discord 提出同類請求（如「規劃一下需求」
   「看數據開單」「這週該做什麼」）時觸發：chainbreak 與 hangman 各自分析、
-  不平均，比對兩個 repo 現有 issue 避免重複，找出寫得出驗收條件的需求，
-  新開加收養合計（兩個 repo 加總、滾動 7 天）最多 3 張，貼 grill-me 與 spec-only（收養另貼
-  pm-owned）；ready-for-human 的單若落在 needs-human 五類就改貼
+  不平均，比對兩個 repo 現有 issue 與所有提案 PR（含被人類關掉的）避免重複，
+  找出寫得出驗收條件的需求，新開提案加收養合計（兩個 repo 加總、滾動 7 天）
+  最多 3 張。新想法不直接開 issue：從 origin/main 切 proposal/<日期>-<slug>
+  分支，只放一個 docs/proposals/ 提案檔，開標題「提案：」的 PR，內文結尾附回覆
+  規則；人類 approve 後由 direction-proposal skill 開 issue。收養貼 grill-me、
+  spec-only、pm-owned；ready-for-human 的單若落在 needs-human 五類就改貼
   needs-human 並留言說明（@ 人類由主機端 human-notifier 發，本 skill 不 @），
-  不落在五類由 Summer 決定後收養。新開的單 body 結尾簽名 — By Summer。
-  數據拿不到就明說，不推測冒充依據。
+  不落在五類由 Summer 決定後收養。數據拿不到就明說，不推測冒充依據。
 ---
 
 # Product Planning
 
-> **本 skill 是責任鏈的起點，`backlog-triage` 接手後段**：這裡開（或收養）
-> 的每張 issue 要帶齊下列標記，各自餵給不同的下游消費者，缺一不可：
+> **本 skill 是責任鏈的起點，`backlog-triage` 接手後段**。兩條入口：
+>
+> - **Summer 自己的新想法 → 提案 PR**（5a，2026-10-23 起，openab-ops Ruling R22）：
+>   人類只負責方向與花錢，所以 Summer 想做的新東西要先讓人類審方向，才投入 grill
+>   與開發。這裡只開提案 PR；人類 approve、merge-poller merge 之後，由
+>   `direction-proposal` skill（`materialize` 模式）開 issue。issue 該帶的標記
+>   （下面三項）由那支 skill 負責。
+> - **人類開的 issue → 收養**（5b）：人類開的單視為方向已確認，不走提案。
+>
+> 收養的（以及 `direction-proposal` 開的）每張 issue 要帶齊下列標記，各自餵給
+> 不同的下游消費者，缺一不可：
 > - **「這是 Summer 的單」的身份標記**——`summer-grill-responder` 用來判斷
 >   該不該讓 Summer 搶答 Rick/Morty 的 grill 提問，只要符合三者之一就算：
 >   author 是 `wman-pm`（Summer 的 GitHub 帳號，人類是 `wm4n`）、body 結尾
->   `— By Summer` 簽名、或帶 `pm-owned` label。**自己新開的單**三者天然
->   具備（仍照舊寫簽名，多一重保險）；**收養人類開的單**作者是 `wm4n`、
+>   `— By Summer` 簽名、或帶 `pm-owned` label。**提案落地開的單**三者天然
+>   具備；**收養人類開的單**作者是 `wm4n`、
 >   body 也不能改寫成 Summer 的，所以只能靠 `pm-owned` label。漏標的後果不是
 >   報錯，是 `summer-grill-responder` 不會觸發 Summer 回答，沒有任何錯誤訊息。
 > - **`grill-me` label**——啟動 Rick/Morty 的 grill 流程。
@@ -43,7 +55,7 @@ description: >-
   不影響結果）。
 - `--property chainbreak` 或 `--property hangman` → 只看那一個。
 
-白名單只有 `wm4n/chainbreak`、`wm4n/hangman` 兩個 repo，開 issue、收養、
+白名單只有 `wm4n/chainbreak`、`wm4n/hangman` 兩個 repo，開提案、收養、
 查現況都只對這兩個 repo 動作。
 
 ## 什麼時候找人：`needs-human` 五類
@@ -109,7 +121,7 @@ label。它在等人類，任何自動化介入都可能蓋過人類的決定，
   GA4，數據依據寫「GA4 查詢失敗，無法查證」並附上錯誤摘要，其餘來源照跑。
 
 GA4 缺席時必須有替代來源，不能以「沒數據」為由收工——這支 skill 是整條
-自主閉環的入口，它不開單，下游就沒有東西可跑。
+自主閉環的入口，它不提案也不收養，下游就沒有東西可跑。
 
 > 上面兩行以驚嘆號加反引號開頭的檢查，會在 skill 載入時展開成 `set` 或空白。
 > 若你看到的仍是未展開的原文（指令文字還在、沒有結果），自己用 Bash 把
@@ -127,14 +139,38 @@ gh pr list --repo wm4n/hangman    --state merged --limit 20 --json number,title,
 `comments` 要一次撈齊：下面候選的留言檢查與「人類處理完之後」判斷都要看
 留言，全部用這份資料，不再逐張另外查。
 
-開放 issue 用來**避免重複開單**：新想法先跟這份清單比對主題，明顯重疊的
-不重開，改成在既有 issue 底下留言補充佐證（既有 issue 若帶 `needs-human`
+開放 issue 用來**避免重複提案**：新想法先跟這份清單比對主題，明顯重疊的
+不提，改成在既有 issue 底下留言補充佐證（既有 issue 若帶 `needs-human`
 則不留言，見上）。近期 merged PR 用來確認「這個功能是不是已經做過了」——
 訊號如果來自一個已經上線的修正，代表資料還沒反映最新版本，不是新需求。
 
-#### label 預檢——新開、收養或升級之前先確認 label 存在
+**提案 PR 也要比對**（2026-10-23，spec A1）。Summer 開過的提案，不論狀態都撈：
 
-對每個 repo，在做任何新開、收養或 `needs-human` 升級**之前**先跑：
+```bash
+for R in wm4n/chainbreak wm4n/hangman; do
+  gh pr list --repo "$R" --author wman-pm --state all --limit 200 \
+    --json number,title,state,headRefName,url \
+    --jq '.[] | select((.headRefName // "") | startswith("proposal/")) | "\(.state)\t#\(.number)\t\(.title)\t\(.url)"'
+done
+```
+
+新想法跟每一張比對主題，依 `state` 處理：
+
+- `CLOSED`（關掉、沒有 merge）→ **人類說了不做**。同一件事不再提，換個說法也不提。
+  這是人類唯一的「不做」訊號，不會另外留言，漏讀它就會一再拿同一件事去煩人類。
+- `OPEN` → 還在等人類審，不重複提。
+- `MERGED` → 方向已核准，issue 已開或即將由 `direction-proposal` 開，不重複提。
+
+查詢失敗 → 這一輪不開任何新提案（收養照常），摘要寫明：沒有這份清單，就分辨不出
+哪些是人類拒絕過的。
+
+**做到一半的提案**：`gh api "repos/$R/git/matching-refs/heads/proposal/" --jq '.[].ref'`
+列出的分支，扣掉上面清單（任何 state）的 `headRefName`，剩下的是「分支推上去了、PR 沒
+開成」。這種分支照 5a 第 5 步把 PR 補開，不要換 slug 另開一份。
+
+#### label 預檢——開提案、收養或升級之前先確認 label 存在
+
+對每個 repo，在做任何開提案、收養或 `needs-human` 升級**之前**先跑：
 
 ```bash
 gh label list --repo wm4n/chainbreak --limit 200 --json name --jq '.[].name'
@@ -145,20 +181,19 @@ gh label list --repo wm4n/hangman    --limit 200 --json name --jq '.[].name'
 把存在的 label 誤判成缺漏。要確認的是 `grill-me`、`spec-only`、`pm-owned`
 （收養用）與 `needs-human`（升級用）。
 
-某個 repo 缺這四個其中任一個 → **這一輪在那個 repo 不收養、不升級、不新開
-issue**，該 repo 的相關候選全部跳過。理由：收養是先留言後加 label，若先貼了
+某個 repo 缺這四個其中任一個 → **這一輪在那個 repo 不收養、不升級、不開新
+提案**，該 repo 的相關候選全部跳過。理由：收養是先留言後加 label，若先貼了
 留言才發現 label 加不上去，issue 上會留下一則「已收養」的留言，實際上卻沒有
-任何 label、沒有任何下游動作，是一則說謊的紀錄；新開 issue 少了
-`grill-me`／`spec-only` 就是一張沒進流程的單。
+任何 label、沒有任何下游動作，是一則說謊的紀錄；提案核准後 `direction-proposal`
+開的 issue 要帶 `grill-me`／`spec-only`，缺 label 的 repo 先提了，核准後也落不了地。
 
 缺的 label 不要自己建（改 repo 設定屬於 `needs-human` 第 2 類），改成：摘要寫明
 哪個 repo 缺哪個 label，請人類建立。摘要不帶 @（見「已知限制」：這件事不在
 human-notifier 的通知範圍內）。
 `gh label list` 本身報錯（網路、權限）→ 同樣當作該 repo 本輪不能收養或升級，
 跳過並在摘要寫明是「label 查詢失敗」，不要憑印象當作 label 存在。
-**新開 issue 也在這個預檢之內**：`gh issue create --label grill-me --label
-spec-only` 遇到 label 不存在，可能直接失敗或建出沒帶 label 的單，所以該 repo
-缺 label（或查詢失敗）時本輪就不在那個 repo 新開，摘要裡說明。
+**開提案也在這個預檢之內**：該 repo 缺 label（或查詢失敗）時本輪就不在那個 repo
+開提案，摘要裡說明。
 
 ### 3. 找需求來源——四選項，全部都讀、不必等 GA4
 
@@ -335,64 +370,151 @@ property 跑多個 preset。追問細節用 `--raw-request '<runReport JSON>'` �
 把 3a–3d 的候選項各自過兩道檢查：
 
 1. **五類檢查**：這項需求本身落在 `needs-human` 五類嗎？落在的不要開成
-   `grill-me` 的單（新想法）或收養（人類的單，見 3b／3c）。新想法的話，
-   在 Discord 摘要裡單獨列一行「需人類決定，未開單：<一句話>」即可。
+   提案（新想法）或收養（人類的單，見 3b／3c）。新想法的話，
+   在 Discord 摘要裡單獨列一行「需人類決定，未開提案：<一句話>」即可。
 2. **可驗證的驗收條件**：每項都要能寫出具體、可驗證的驗收條件，**不限於
    GA4 指標**，功能性條件也算（例如「設定頁新增 X 開關，關閉後 Y 不再
    出現」「結算頁跳出率從 X% 降到 Y% 以下」）。寫不出這種條件的項目直接
-   捨棄，不開單、不收養、不硬湊一個模糊的驗收條件充數。
+   捨棄，不提案、不收養、不硬湊一個模糊的驗收條件充數。
 
-**上限：新開加收養，兩個 repo 加總、滾動 7 天最多 3 張**，不是每個 repo
+**上限：新開提案加收養，兩個 repo 加總、滾動 7 天最多 3 張**，不是每個 repo
 各 3 張，也不是「這一輪」3 張。本 skill 依 usercron 排程（以 CRONJOB.md 為準）定期跑，
-但人類也能在 Discord 隨時手動觸發，只算「這一輪」的話手動多跑幾次就能繞過每週上限。所以**開單
-或收養之前先算最近 7 天已用掉多少**（兩個 repo 加總）：
+但人類也能在 Discord 隨時手動觸發，只算「這一輪」的話手動多跑幾次就能繞過每週上限。所以**開提案
+或收養之前先算最近 7 天已用掉多少**（兩個 repo 加總）。提案在**開 PR 時**就計入，
+之後被核准、落地成 issue 不再重複計算（spec A1）：
 
 ```bash
 SINCE=$(date -u -d '7 days ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-7d +%Y-%m-%dT%H:%M:%SZ)
 for REPO in wm4n/chainbreak wm4n/hangman; do
-  # Summer 近 7 天新開的單（作者 wman-pm）
-  gh issue list --repo "$REPO" --author wman-pm --state all --limit 200 \
-    --json createdAt --jq "[.[] | select(.createdAt >= \"$SINCE\")] | length"
+  # Summer 近 7 天開的提案 PR（不論後來被 merge、關掉或還在審）
+  gh pr list --repo "$REPO" --author wman-pm --state all --limit 200 --json headRefName,createdAt \
+    --jq "[.[] | select(((.headRefName // \"\") | startswith(\"proposal/\")) and .createdAt >= \"$SINCE\")] | length"
+  # Summer 近 7 天直接開的單（2026-10-23 以前的 5a）。body 含 docs/proposals/ 的是提案落地開的，
+  # 已在開提案時算過，排除
+  gh issue list --repo "$REPO" --author wman-pm --state all --limit 200 --json createdAt,body \
+    --jq "[.[] | select(.createdAt >= \"$SINCE\" and ((.body // \"\") | contains(\"docs/proposals/\") | not))] | length"
   # Summer 近 7 天的收養（以「## Summer 收養此單」留言為準）
   gh issue list --repo "$REPO" --state all --limit 200 --json comments \
     --jq "[.[] | select(any(.comments[]; .author.login == \"wman-pm\" and (.body | startswith(\"## Summer 收養此單\")) and .createdAt >= \"$SINCE\"))] | length"
 done
 ```
 
-四個數字相加得「已用」，**本輪剩餘預算 ＝ 3 − 已用**，≤ 0 就這輪不新開
-也不收養（`needs-human` 升級不受影響）。**續做一個做到一半的收養（5b）
+六個數字相加得「已用」，**本輪剩餘預算 ＝ 3 − 已用**，≤ 0 就這輪不開提案
+也不收養（`needs-human` 升級不受影響）。任何一個查詢失敗 → 當作預算已用完，
+本輪不開提案也不收養，摘要寫明。補開做到一半的提案（步驟 2 最後一段）一樣在開
+PR 時計入，排在全新提案前面。**續做一個做到一半的收養（5b）
 不受預算限制**：它的收養留言在貼出當時已經算進「已用」，所以剩餘預算是 0
-也照樣補完。**下面的優先順序與同層排序，只對「全新的收養與新開」生效，續做
+也照樣補完。**下面的優先順序與同層排序，只對「全新的收養與新提案」生效，續做
 候選不參與、不會被它們擠掉**——續做一定會跑。
 
 預算不夠把候選全做完時，依序保留：①`ready-for-human` 收養 ②backlog 收養
-③新開的單——前兩者背後已經有人類明確的需求，新開的單只是 Summer 自己的
+③新提案——前兩者背後已經有人類明確的需求，新提案只是 Summer 自己的
 猜測，不該擠掉人類已經提出的需求。**同一優先層內，兩個 repo 合在一起，
 依 `createdAt` 由舊到新取**——最舊的單等得最久；不寫死規則的話，每次執行
 挑的單會不一樣，同一張可能永遠輪不到。`needs-human` 的升級不計入預算。
 
-一張都沒有也是合法結果：寫不出驗收條件就是寫不出（或預算已用完），不要為了湊數開單。
+一張都沒有也是合法結果：寫不出驗收條件就是寫不出（或預算已用完），不要為了湊數提案。
 Discord 摘要照實說「本輪無符合條件的需求」與原因。
 
-### 5a. 新開 issue
+### 5a. 開提案 PR（Summer 自己的新想法）
 
-該 repo 通過 label 預檢（含 `grill-me`、`spec-only`）才新開；沒通過就跳過，摘要說明。
+2026-10-23 起（openab-ops Ruling R22），新想法不再直接開 issue，改開**提案 PR**
+讓人類先審方向。人類怎麼回覆寫在 PR 內文結尾的回覆規則裡；之後依人類意見修改
+提案、核准後開 issue，都是 `direction-proposal` skill 的事，本 skill 開完 PR 就結束
+這一張。（🕘 2026-10-23 以前這一步是直接 `gh issue create --label grill-me --label
+spec-only`；issue body 的格式與簽名規則搬到 `direction-proposal` 的 `materialize`。）
+
+前提：該 repo 通過 label 預檢、步驟 2 的提案清單查得到、本輪剩餘預算 > 0。
+
+**唯讀例外只有這一步**：本 skill 平常不碰 repo 內容。開提案時只准做兩件事：
+
+- 在 `proposal/<YYYY-MM-DD>-<slug>` 分支上新增 `docs/proposals/<YYYY-MM-DD>-<slug>.md`
+  這**一個**檔案，並 push 這個分支；
+- 開一張 base 是 `main`、head 是這個分支的 PR。
+
+其他路徑、其他分支（包括 `main`）一律不碰。主機端 merge-poller 只 merge「只動
+`docs/proposals/*.md`」的提案 PR，動到別的路徑會被升級 `needs-human`。
+
+**提案 PR 的標題、內文、提案檔、commit 訊息都不得出現關閉關鍵字接 issue 編號**
+（`close`／`closes`／`closed`／`fix`／`fixes`／`fixed`／`resolve`／`resolves`／
+`resolved` 後面接 `#N` 或 `owner/repo#N`，大小寫不拘）：提案 merge 之後 GitHub 會
+直接關掉那張 issue，而且 `acceptance-review`、`backlog-triage` 會把這張提案誤當成
+那張 issue 的實作 PR。要提到相關 issue，寫「相關：#N」。
+
+#### 第 1 步：定名稱
 
 ```bash
-gh issue create --repo wm4n/chainbreak \
-  --title "<標題>" \
-  --label grill-me \
-  --label spec-only \
-  --body "$(cat <<'EOF'
+REPO=wm4n/chainbreak        # 這張提案的 repo
+SLUG='<英文小寫、數字、連字號，最多 40 字，例：daily-streak-reward>'
+D=$(TZ=Asia/Taipei date +%F)
+printf '%s' "$SLUG" | grep -Eq '^[a-z0-9]+(-[a-z0-9]+)*$' && [ "${#SLUG}" -le 40 ] \
+  && echo "NAME_OK REPO=$REPO D=$D SLUG=$SLUG" || echo "NAME_BAD"
+```
+
+印出 `NAME_BAD` 就換一個 slug。之後每次 Bash 呼叫開頭，都用這裡印出的值逐字重設
+`REPO`、`D`、`SLUG`（`D` 不要重新取日期：跨過午夜會變），再用下面同一組算式得出其他
+變數。**補開做到一半的提案**（步驟 2 最後一段）時，`D`、`SLUG` 從既有分支名
+`proposal/<D>-<SLUG>` 拆出來，跳過第 2–4 步，直接做第 5 步。
+
+```bash
+OWNER="${REPO%%/*}"; REPO_NAME="${REPO#*/}"
+BRANCH="proposal/$D-$SLUG"
+FILE="docs/proposals/$D-$SLUG.md"
+BASE="/home/node/repos/$OWNER/$REPO_NAME"
+WT="/home/node/repos/$OWNER/$REPO_NAME-worktrees/proposal-$D-$SLUG"
+STATE="/tmp/product-planning/proposal-$OWNER-$REPO_NAME-$D-$SLUG"
+mkdir -p "$STATE"
+```
+
+#### 第 2 步：從 `origin/main` 開 worktree
+
+```bash
+[ -d "$BASE/.git" ] || gh repo clone "$REPO" "$BASE"
+git -C "$BASE" fetch origin
+git -C "$BASE" worktree prune
+[ -e "$WT" ] && git -C "$BASE" worktree remove --force "$WT"
+[ -e "$WT" ] && /bin/rm -rf "$WT" && git -C "$BASE" worktree prune
+git -C "$BASE" ls-remote --exit-code --heads origin "$BRANCH" >/dev/null; RC=$?
+if [ "$RC" = 0 ]; then
+  echo "BRANCH_EXISTS"
+elif [ "$RC" != 2 ]; then
+  echo "LS_REMOTE_FAILED rc=$RC"
+elif git -C "$BASE" worktree add -B "$BRANCH" "$WT" origin/main; then
+  echo "WT_OK $WT"
+else
+  echo "WT_FAILED"
+fi
+```
+
+- `BRANCH_EXISTS` → 全新提案撞名，換一個 slug 重來。
+- `LS_REMOTE_FAILED`、`WT_FAILED` → 這張本輪不開，記進摘要。
+
+#### 第 3 步：寫提案檔
+
+寫到 `$WT/$FILE`（先 `mkdir -p "$WT/docs/proposals"`）。格式固定：
+
+````markdown
+# 提案：<標題>
+
 ## 背景
 
-<這個需求是從哪個來源發現的：repo 文件哪一段／哪張人類 issue／GA4 訊號>
+<從哪個來源發現：repo 文件哪一段／哪張 issue（寫「相關：#N」）／GA4 訊號>
 
-## 需求描述
+## 方向說明
 
-<要做成什麼樣子>
+<要做成什麼樣子、為什麼值得做>
 
-## 驗收條件
+## 方案
+
+### 方案 A：<一句話>
+
+<做法與取捨>
+
+### 方案 B：<一句話>（建議）
+
+<做法與取捨，以及為什麼建議這個>
+
+## 驗收條件草稿
 
 - <條件一>
 - <條件二>
@@ -405,13 +527,100 @@ gh issue create --repo wm4n/chainbreak \
 
 ---
 — By Summer
-EOF
-)"
+````
+
+- 六個段落缺一不可，驗收條件草稿要過步驟 4 的「可驗證」檢查。
+- **方案小標題的格式固定**，`direction-proposal materialize` 靠它找出人類選的方案：
+  - 只有一個方案 → 「## 方案」底下直接寫，**不加**任何 `### 方案 X` 小標題。
+  - 兩個以上 → 每個一行 `### 方案 <大寫英文字母>：<一句話>`，字母從 A 起連續；
+    **恰好一個**在行尾加 `（建議）`（全形括號）。人類 approve 時沒寫選哪個，就做這個。
+- 結尾逐字 `— By Summer`（em dash U+2014），直接複製本文件的字串。
+
+#### 第 4 步：commit、確認範圍、push
+
+```bash
+# （開頭先照第 1 步重設 REPO、D、SLUG 與那組算式）
+CLOSE_RE='(^|[^A-Za-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+'
+if grep -Eiq "$CLOSE_RE" "$WT/$FILE"; then
+  echo "CLOSE_KEYWORD_IN_FILE"
+else
+  git -C "$WT" add -- "$FILE" && git -C "$WT" commit -q -m "docs(proposal): <標題>"
+  CHANGED=$(git -C "$WT" diff --name-only origin/main...HEAD)
+  if [ "$CHANGED" = "$FILE" ] && [ -z "$(git -C "$WT" status --porcelain)" ]; then
+    git -C "$WT" push origin "HEAD:refs/heads/$BRANCH" && echo "PUSH_OK"
+  else
+    echo "SCOPE_BAD changed=[$CHANGED]"
+  fi
+fi
 ```
 
-body 五個段落缺一不可：標題另外用 `--title`，背景、需求描述、驗收條件、
-數據依據都要有內容。**結尾一定是 `— By Summer`**，`--label grill-me` 與
-`--label spec-only` 跟建 issue 同一步做完，這步不用等人類點頭。
+只有印出 `PUSH_OK` 才往下做。`CLOSE_KEYWORD_IN_FILE` → 改掉那句再跑一次。
+`SCOPE_BAD` 或 push 失敗 → 不 push（或停在這裡），這張本輪不開，記進摘要。push 不加
+`--force`。commit 訊息同樣不得有關閉關鍵字。
+
+#### 第 5 步：開 PR，內文結尾附回覆規則
+
+內文先寫進檔案。**回覆規則是內文的最後一段，逐字照抄下面那段 heredoc、一字不改**：
+人類要求每張提案都把怎麼回覆講一次（spec A1）。
+
+```bash
+# （開頭先照第 1 步重設 REPO、D、SLUG 與那組算式）
+{
+printf '%s\n\n' '<一段話摘要：想做什麼、為什麼>'
+printf '提案檔：`%s`\n' "$FILE"
+printf '方案：%s\n\n' '<只有一個方案／方案 A、方案 B，建議方案 B>'
+printf '核准後 Summer 會依選定的方案開 issue，之後照現行流程進 grill 與開發。\n\n'
+printf -- '— By Summer\n\n'
+cat <<'EOF'
+## 怎麼回覆這張提案
+- **Approve** → 照做。有多個方案時，在 review 內文寫「方案 B」選定方案（沒寫就由 Summer 依提案中的建議方案）。
+- **Request changes** ＋你的想法 → 不同意方向或想調整都用這個；Summer 會在這張 PR 修改後再請你重審，可以來回多次。
+- **關掉 PR（不 merge）** → 整個不做；Summer 之後不會再提同一件事。
+EOF
+} > "$STATE/pr_body.md"
+TITLE='提案：<標題>'
+CLOSE_RE='(^|[^A-Za-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[[:space:]]*:?[[:space:]]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+'
+if printf '%s\n' "$TITLE" | cat - "$STATE/pr_body.md" | grep -Eiq "$CLOSE_RE"; then
+  echo "CLOSE_KEYWORD_IN_PR"
+else
+  gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "$TITLE" --body-file "$STATE/pr_body.md"
+fi
+```
+
+確認開成了（作者、標題前綴、回覆規則在最後、沒有關閉關鍵字，全部成立才印 `PR_OK`）：
+
+```bash
+# （開頭先照第 1 步重設 REPO、D、SLUG 與那組算式）
+gh pr list --repo "$REPO" --head "$BRANCH" --state open --json url,title,author,body --jq '
+  .[] | ((.body // "") | gsub("[\t\r\n \u00a0\u3000]+$"; "")) as $b
+  | if (.author.login // "") == "wman-pm"
+       and (.title | startswith("提案："))
+       and ($b | contains("\n## 怎麼回覆這張提案\n"))
+       and ($b | endswith("**關掉 PR（不 merge）** → 整個不做；Summer 之後不會再提同一件事。"))
+       and ((.title + "\n" + $b) | test("(^|[^A-Za-z0-9_])(close[sd]?|fix(e[sd])?|resolve[sd]?)[\t ]*:?[\t ]+([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)?#[0-9]+"; "i") | not)
+    then "PR_OK \(.url)" else "PR_BAD \(.url)" end'
+```
+
+- `PR_OK` → 這張提案算進預算，完成。
+- `PR_BAD` → 不要關 PR、不要改它，記進摘要請人類看（內文寫錯的提案 PR 由人類決定
+  要關掉還是留著）。
+- 沒有任何輸出（PR 沒開成）→ 記進摘要。分支已經 push 了，下一輪步驟 2 會把它列成
+  「做到一半的提案」補開 PR。
+
+**不要等人類、不要 @ 人類**：提案待審的通知由主機端 `human-notifier.sh` 發（作者
+`wman-pm`、分支 `proposal/*`、目前 head 上還沒有 `wm4n` 的 review 就 @ 一次，附回覆
+規則摘要）。
+
+#### 第 6 步：移除 worktree（成功、失敗都做）
+
+```bash
+# （開頭先照第 1 步重設 REPO、D、SLUG 與那組算式）
+git -C "$BASE" worktree remove --force "$WT"
+git -C "$BASE" worktree prune
+[ ! -e "$WT" ] && echo "WT_REMOVED"
+```
+
+沒印出 `WT_REMOVED` → 記進摘要，下一張照做（同名殘留會在第 2 步先清掉）。
 
 ### 5b. 收養人類開的 issue（`pm-owned`）
 
@@ -478,7 +687,7 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
 
 ### 6. Discord 貼精簡摘要
 
-只貼：新開的標題、收養的 issue、`needs-human` 升級的 issue、各一句話理由與
+只貼：新開的提案 PR（標題與連結）、收養的 issue、`needs-human` 升級的 issue、各一句話理由與
 連結，不要把完整 body 貼進 Discord——單則訊息有 2000 字限制，超過會被截斷，
 而截斷後的訊息內容不完整還可能被其他 poller 誤判成新事件、重複觸發。
 **摘要不帶任何 @**（2026-10-17 改，R17）：`needs-human` 的通知由主機端
@@ -492,14 +701,18 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
   **絕不用推測冒充數據依據**——掰一個聽起來合理但沒有查證的數字，比誠實說
   「不知道」更糟，會讓後面排優先序的人依據假數據做判斷。
 - 兩個 property（repo）**永遠分開報告**，不平均、不加總。
-- 新開的 issue body 結尾**逐字** `— By Summer`（em dash 開頭），這是
-  `summer-grill-responder` 判斷該不該搶答的依據之一。
-- **新開貼齊 `grill-me` 與 `spec-only`；收養貼齊 `grill-me`、`spec-only`、
-  `pm-owned`**——`spec-only` 是 `jira-grill` 判斷要不要跳過工程階段的依據，
-  `pm-owned` 是收養單被 `summer-grill-responder` 辨識的依據，用途各不同，
-  不能漏貼。
-- **新開加收養合計（兩個 repo 加總）滾動 7 天最多 3 張**，開之前先算最近 7 天
-  已用多少；`needs-human` 升級不計入。
+- **新想法一律走提案 PR，不直接開 issue**（R22）。提案檔與 PR 內文結尾逐字
+  `— By Summer`；PR 內文的最後一段是回覆規則，逐字照抄 5a 第 5 步；標題、內文、
+  提案檔、commit 訊息都不得有關閉關鍵字接 issue 編號。核准後開的 issue 帶什麼
+  label、body 怎麼簽名，以 `direction-proposal` 為準。
+- **唯讀例外只限 5a**：只在 `proposal/<YYYY-MM-DD>-<slug>` 分支上新增
+  `docs/proposals/` 底下那一個提案檔、push 那個分支、開 PR；其他路徑與分支一律不碰。
+- **收養貼齊 `grill-me`、`spec-only`、`pm-owned`**——`spec-only` 是 `jira-grill`
+  判斷要不要跳過工程階段的依據，`pm-owned` 是收養單被 `summer-grill-responder`
+  辨識的依據，用途各不同，不能漏貼。
+- **新開提案加收養合計（兩個 repo 加總）滾動 7 天最多 3 張**，開之前先算最近 7 天
+  已用多少；提案在開 PR 時計入，落地成 issue 不重複算；`needs-human` 升級不計入。
+- **被人類關掉、沒有 merge 的提案就是「不做」**：同一件事不再提。
 - **label 一律先加後移除**：收養 `ready-for-human` 的單最後才移除
   `ready-for-human`；`ready-for-human` 改貼 `needs-human` 也是先加
   `needs-human` 再移除 `ready-for-human`。
@@ -509,7 +722,7 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
   就整個停手。已有升級留言卻沒有 label，
   是人類處理完移除的，**絕不重新加回**。
 - **帶 `needs-human` 的 issue 一律不動**。
-- **收養、升級、新開之前先做 label 預檢**，缺 `grill-me`／`spec-only`／
+- **收養、升級、開提案之前先做 label 預檢**，缺 `grill-me`／`spec-only`／
   `pm-owned`／`needs-human` 任一個，那個 repo 本輪就不做這些動作。
 - **續做做到一半的收養不受預算與排序限制**，一定會跑。
 - **不在 Discord @ 任何人**：通知人類是主機端 `human-notifier.sh` 的事（R17）。
@@ -521,10 +734,12 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
 
 ## 不做什麼
 
-- **不 clone repo、不建 worktree、不切分支**——這支 skill 只讀 repo 文件
-  （經 `gh api`）、`gh issue`／`gh pr` 的列表資訊，以及（有設定時）GA4
-  報表，不需要讀程式碼。
-- **不排優先序、不決定該不該投產**——找需求、開單、收養、貼 `grill-me`
+- **除了 5a 開提案，不 clone repo、不建 worktree、不切分支**——其他步驟只讀
+  repo 文件（經 `gh api`）、`gh issue`／`gh pr` 的列表資訊，以及（有設定時）GA4
+  報表，不需要讀程式碼。5a 的 worktree 只用來寫提案檔，不碰程式碼。
+- **不修改提案、不把提案落地成 issue、不 merge**——依人類 review 修改提案、核准後
+  開 issue 是 `direction-proposal` 的事；merge 是主機端 merge-poller 的事。
+- **不排優先序、不決定該不該投產**——找需求、開提案、收養、貼 `grill-me`
   到此為止，之後規格共識、排優先序、貼 `ready-for-agent` 是
   `backlog-triage` 的職責。
 - **不自己回答 grill 提問**——那是 `grill-respond` 的職責，由
@@ -550,3 +765,8 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
   全新候選，可能再被升級一次、多一次通知。機率極低，接受，不為它加額外機制。
 - **寫不出驗收條件的人類單不會被收養**，也不會自動升級給人類，下一輪會
   再被看到一次——這是刻意的：缺資訊不屬於 `needs-human` 五類。
+- **提案去重靠主題比對**：被關掉的提案換了標題、換了 slug，仍要靠 Summer 讀標題
+  判斷是不是同一件事；`gh pr list --limit 200` 只看最近 200 張 Summer 的 PR，更早被
+  關掉的提案讀不到。
+- **提案 PR 的 push 依賴 Summer 容器的 git 憑證**（`gh auth setup-git`）：上線前在
+  容器內對 `proposal/*` 分支跑一次 `git push --dry-run` 確認（openab-ops runbook）。
