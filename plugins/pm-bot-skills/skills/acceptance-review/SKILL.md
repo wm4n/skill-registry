@@ -10,16 +10,17 @@ description: >-
   「驗收一下」「這張 PR 符合需求嗎」）時觸發。驗收基準三層：「✅ 需求
   共識」→ issue body 驗收條件段、Summer 規格修正段與 wm4n 留言（標「基準
   較弱」）→ 都沒有就貼 needs-human 找人決定基準，只報一次。通過 → 在 PR
-  貼「驗收結果：通過（待人類 merge）」（head SHA、逐條依據、測試指令與輸出
-  結尾），issue 貼一行連結，由主機端 human-notifier 通知人類 merge。測試失敗
+  貼「驗收結果：通過（待自動 merge）」（head SHA、逐條依據、測試指令與輸出
+  結尾），issue 貼一行連結，由主機端 merge-poller 依這則結果自動 merge（不在
+  本 skill）。測試失敗
   先對 base branch 跑同一組指令：base 也紅歸「無法驗證（基線紅）」，不算重做。
   不通過、有衝突或 base 綠 head 紅 → 先算重做次數，未達 2 次用綁 head SHA 的
   Request changes 送回 bot 作者（由主機端 pr-review-poller 觸發作者）；達 2 次
   改貼 needs-human、不送回；作者不是 bot 帳號只留言、不送回，由主機端
   human-notifier 通知人類處理。本 skill 不在 Discord @ 任何人。同一個 head SHA
   只驗一次；送回做到一半會續做，作者回應了卻沒推新 commit 就留停滯通報（每個
-  SHA 最多 2 次）。永不 approve、永不 merge（自動 merge 暫緩，
-  等人類決定是否開放）。帶 needs-human 的單一律不動，不改任何 label。
+  SHA 最多 2 次）。本 skill 永不 approve、永不 merge。帶 needs-human 的單一律
+  不動，不改任何 label。
 ---
 
 # Acceptance Review
@@ -30,34 +31,47 @@ description: >-
 > head 上真的全綠嗎**。第二個問題由 Summer 自己跑：chainbreak 沒有 CI，這是
 > merge 前唯一的客觀證據，不能只信作者自稱「已自審」。
 >
-> ⏸️ **自動 approve＋merge 暫緩，等人類決定是否開放**（2026-10-17）：讓 bot
-> 不經人工 review 就 merge 到 main，是整套自主閉環裡風險最高、最難回收的
-> 一步，自動模式的安全分類器也以「Merge Without Review」擋下。所以這一版：
+> 🔀 **merge 由主機端 merge-poller 自動執行，不在本 skill**（2026-10-23 起，
+> openab-ops Ruling R21，作廢 R14）：
 >
-> - 通過 → 在 PR 貼驗收通過的結果（head SHA、逐條依據、測試指令與輸出），
->   **merge 留給人類**。人類只需確認那則結果、按一下 merge，不用再自己驗收。
+> - 通過 → 在 PR 貼驗收通過的結果（head SHA、逐條依據、測試指令與輸出）。
+>   Mac mini 上的 `merge-poller.sh` 讀到這則結果、確認 `head SHA：` 等於 PR
+>   目前的 head，並檢查完它自己的條件（PR 已含最新 main、可合併、沒有費用或權限
+>   風險、未達每日上限、沒有熔斷）後，用 `wman-pm` 的 token squash merge。
 > - 不通過 → 用 Request changes 送回原作者（這不是 approve，可以做），受
 >   重做上限約束。
 >
-> **永不 approve、永不 merge**：本文件裡沒有任何 approve 或 merge 的指令，
-> 也不要自己補上。
+> **本 skill 永不 approve、永不 merge**：本文件裡沒有任何 approve 或 merge 的
+> 指令，也不要自己補上。merge 的決定全部由 merge-poller 依程式條件做。
+>
+> 🕘 2026-10-17 到 2026-10-23 之間，自動 approve＋merge 暫緩，通過標題是
+> `## 驗收結果：通過（待人類 merge）`，由人類按 merge（自動模式的安全分類器以
+> 「Merge Without Review」擋下 bot 自己 merge）。R21 把 merge 移到主機端程式，
+> 標題直接改名，沒有新舊並存期（`wman-pm` 從未貼過舊標題）。
 >
 > 📡 **Discord 的觸發與 @人類 都不是本 skill 發的**（Ruling R17，2026-10-17）：
 > 本 skill 由 usercron 在 `summer-pm` 的 thread 裡跑，輸出只回得到那個 thread，
 > Rick／Morty 也收不到那裡的訊息。所以本 skill **只在 GitHub 上留痕**——送
 > Request changes review、貼固定標題的留言、加 `needs-human` label——由 Mac mini
-> 主機端的兩支 poller 讀 GitHub 之後發到 `bot-notify`：
+> 主機端的三支 poller 讀 GitHub 之後各自動作：
 >
 > - `pr-review-poller.sh`：看到 PR 上有還沒回應的 `wman-pm`（或 `wm4n`）Request
 >   changes，就觸發作者跑 `pr-review-response`。
+> - `merge-poller.sh`：讀 `## 驗收結果：通過（待自動 merge）` 與它的 `head SHA：`
+>   決定要不要 merge（R21）。PR 落後 main 而且併不進去時，它會用 `wman-pm` 在 PR 送一則
+>   首行為 `## 自動 merge 受阻：與 main 衝突` 的 Request changes；費用或權限風險則升級
+>   `needs-human`（第二行 `原因：自動 merge 前偵測到可能的費用或權限風險（第 1／2 類）`）。
+>   這兩種都是 merge-poller 寫的，**不是本 skill 的送回或升級**，本 skill 讀紀錄時要
+>   排除它們（見步驟 3a、8a、8d）。
 > - `human-notifier.sh`：`needs-human` 被加上、或 PR／issue 上出現 `wman-pm` 貼的
->   `## 驗收結果：通過（待人類 merge）`、`## 驗收結果：無法驗證（測試環境）`、
->   `## 驗收結果：無法驗證（基線紅）`、`## 驗收停滯：PR head 未更新`、
->   `## 驗收紀錄補記失敗`、`## 驗收結果：不通過（作者非 bot，待人類處理）`，就 @ 人類
->   一次（一般的 `## 驗收結果：不通過` 不通知）。
+>   `## 驗收結果：無法驗證（測試環境）`、`## 驗收結果：無法驗證（基線紅）`、
+>   `## 驗收停滯：PR head 未更新`、`## 驗收紀錄補記失敗`、
+>   `## 驗收結果：不通過（作者非 bot，待人類處理）`，就 @ 人類一次（一般的
+>   `## 驗收結果：不通過` 不通知）。通過**不通知**：通過已經不需要人類動作；只有通過
+>   之後超過 12 小時 PR 還沒被 merge，它才 @ 人類一次（pass-stale）。
 >
-> 所以那幾個標題的第一行一個字都不能改，改了人類就收不到通知。本 skill 在
-> Discord 只回本輪摘要（不帶任何 @）。
+> 所以那幾個標題的第一行一個字都不能改：改了 merge-poller 就不 merge，人類也收不到
+> 通知。本 skill 在 Discord 只回本輪摘要（不帶任何 @）。
 
 ## 觸發與參數
 
@@ -126,12 +140,12 @@ STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 
 | 第一行 | 貼在哪 | 拿來做什麼 |
 | --- | --- | --- |
-| `## 驗收結果：通過（待人類 merge）` | PR | 冪等（記下驗過的 SHA）；**human-notifier 據此 @ 人類 merge** |
+| `## 驗收結果：通過（待自動 merge）` | PR | 冪等（記下驗過的 SHA）；**主機端 merge-poller 據此自動 merge（不在本 skill）**；human-notifier 不通知，只在 12 小時未 merge 時提醒 |
 | `## 驗收結果：不通過` | issue | 冪等；**`backlog-triage` 靠它算重做次數**；送回給 bot 作者的紀錄，不通知人類 |
 | `## 驗收結果：不通過（作者非 bot，待人類處理）` | issue | PR 作者不是 bot 帳號時用這一行取代上一行（2026-10-17 fix round 1）：不送回、要人類處理；**human-notifier 通知**。它以 `## 驗收結果：不通過` 開頭，重做次數與冪等照樣算到 |
 | `## 驗收結果：無法驗證（測試環境）` | PR | 冪等；Summer 環境跑不起來，不算重做；human-notifier 通知 |
 | `## 驗收結果：無法驗證（基線紅）` | PR | 冪等；base branch 自己就紅（R18），不算重做；human-notifier 通知 |
-| `## 需要人類決定（needs-human）` | issue | 升級紀錄（R15，見下）；第二行區分兩種升級。通知靠 label 事件，不靠這則 |
+| `## 需要人類決定（needs-human）` | issue | 升級紀錄（R15，見下）；第二行區分兩種升級。通知靠 label 事件，不靠這則。merge-poller 也會貼同一個首行（第二行是費用或權限風險），那則不是本 skill 的紀錄，3a 會排除 |
 | `## 驗收停滯：PR head 未更新` | PR | 通報停滯（原因寫在內文）；每個 SHA 最多 2 則，去重規則見步驟 3；human-notifier 通知 |
 | `## 驗收紀錄補記失敗` | PR | 8d 補記不通過紀錄失敗時通報人類；每個 SHA 只報一次；human-notifier 通知 |
 
@@ -352,28 +366,38 @@ query($owner:String!, $repo:String!, $issue:Int!) {
   repository(owner:$owner, name:$repo) {
     issue(number:$issue) {
       closedByPullRequestsReferences(first:5, includeClosedPrs:true) {
-        nodes { number url title state }
+        nodes { number url title state headRefName author { login } }
       }
     }
   }
-}' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM" 2>&1); then
+}' -F owner="$OWNER" -F repo="$REPO_NAME" -F issue="$NUM" \
+  --jq '.data.repository.issue.closedByPullRequestsReferences.nodes[]
+    | select(((.author.login // "") == "wman-pm" and ((.headRefName // "") | startswith("proposal/"))) | not)
+    | "\(.number)\t\(.state)\t\(.url)\t\(.title)"' 2>&1); then
   echo "ERROR: GraphQL 查詢失敗 issue=${REPO}#${NUM}"
 fi
 echo "$GRAPHQL_OUTPUT"
 ```
 
+輸出每行一張候選 PR：`<編號>\t<state>\t<網址>\t<標題>`。
+
 - `issue` 一定用 `-F`（`Int!`），用 `-f` 會型別錯誤。`includeClosedPrs:true`
   讓已關閉的 PR 也回傳，下面才分得出「有 PR 但不是 OPEN」。
+- **提案 PR 不算候選**（2026-10-23，R22）：作者 `wman-pm`、`headRefName` 以
+  `proposal/` 開頭的是 Summer 的方向提案，不是這張 issue 的實作。上面的 jq 已經
+  把它濾掉；它本來就不准寫 `Closes #`，濾掉是保證它就算被連上也不會讓下面的
+  「超過一個 OPEN」誤判成異常。
 - **查詢本身報錯** → 歸類「異常」，記下原始錯誤，**不要靜默滑進 fallback**：
   schema 變動、權限問題會被 fallback 吃掉、沒人發現。
-- 剛好一個 `state` 為 `OPEN` 的 node → 就是這張 PR。
-- 沒有 node，或沒有一個是 `OPEN` → 走下面的 fallback。
+- 剛好一個 `state` 為 `OPEN` 的候選 → 就是這張 PR。
+- 沒有候選，或沒有一個是 `OPEN` → 走下面的 fallback。
 - 超過一個 `OPEN` → 歸類「異常」，列出所有候選，不要自己猜一個。
 
 **Fallback：留言文字比對**。在 issue `comments`（舊到新）裡找 Rick/Morty
 收尾留言中的 `https://github.com/<owner>/<repo>/pull/<N>` 連結，取**最新**一則，
-並用 `gh pr view` 確認那張 PR 是 `OPEN`。兩條路都落空 → 歸類「異常」，不要
-憑標題湊一個 PR 編號。
+並用 `gh pr view "$N" --repo "$REPO" --json state,author,headRefName` 確認那張 PR 是
+`OPEN`、而且不是提案 PR（作者 `wman-pm` 且分支以 `proposal/` 開頭）。兩條路都落空 →
+歸類「異常」，不要憑標題湊一個 PR 編號。
 
 ### 3. 讀 PR 狀態，決定這一輪要不要驗
 
@@ -407,22 +431,28 @@ if RAW=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
   MARK_AT=$(printf '%s\n' "$MARK" | cut -d' ' -f1)
 else FACTS_OK=no; fi
 # (2) Summer 在目前這個 SHA 上最新一次 Request changes 的時間與距今秒數
+#     排除 merge-poller 的衝突 review（首行 ## 自動 merge 受阻：與 main 衝突）：它也是 wman-pm 送的，
+#     算進來的話 R2 會把它當成本 skill 送回做到一半，8d 補貼一則不通過、重做次數平白多一次
 if RAW=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
-  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$HEAD_SHA\") | \"\(.submitted_at) \((now - (.submitted_at | fromdateiso8601)) | floor)\""); then
+  --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$HEAD_SHA\") | select((.body // \"\") | split(\"\n\") | (.[0] // \"\") | gsub(\"^[\t \u00a0\u3000]+\"; \"\") | startswith(\"## 自動 merge 受阻：與 main 衝突\") | not) | \"\(.submitted_at) \((now - (.submitted_at | fromdateiso8601)) | floor)\""); then
   REV=$(printf '%s\n' "$RAW" | grep . | sort | tail -n 1)
   REV_AT=$(printf '%s\n' "$REV" | cut -d' ' -f1)
   REV_AGE=$(printf '%s\n' "$REV" | cut -s -d' ' -f2)
 else FACTS_OK=no; fi
 # (3) 紀錄留言（固定標題表的前五種、而且有 head SHA 的），PR 與 issue 兩邊都撈。
+#     merge-poller 的 needs-human（第二行是費用或權限風險）不是本 skill 的紀錄，排除。
 #     每行：<時間>\t<SHA>\t<標題>\t<距今秒數>
 REC_JQ='.[] | select(.user.login == "wman-pm")
-  | (.body | split("\n")[0] | sub("^\\s+"; "") | sub("\\s+$"; "")) as $h
-  | select(($h | startswith("## 驗收結果：通過（待人類 merge）"))
+  | ((.body // "") | split("\n")) as $l
+  | (($l[0] // "") | gsub("^[\t \u00a0\u3000]+|[\t\r \u00a0\u3000]+$"; "")) as $h
+  | (($l[1] // "") | gsub("^[\t \u00a0\u3000]+|[\t\r \u00a0\u3000]+$"; "")) as $h2
+  | select(($h | startswith("## 驗收結果：通過（待自動 merge）"))
       or ($h | startswith("## 驗收結果：不通過"))
       or ($h | startswith("## 驗收結果：無法驗證（測試環境）"))
       or ($h | startswith("## 驗收結果：無法驗證（基線紅）"))
-      or ($h | startswith("## 需要人類決定（needs-human）")))
-  | ((.body | capture("head SHA：(?<s>[0-9a-f]{40})") | .s) // "none") as $s
+      or (($h | startswith("## 需要人類決定（needs-human）"))
+          and $h2 != "原因：自動 merge 前偵測到可能的費用或權限風險（第 1／2 類）"))
+  | (((.body // "") | capture("head SHA：(?<s>[0-9a-f]{40})") | .s) // "none") as $s
   | select($s != "none")
   | "\(.created_at)\t\($s)\t\($h)\t\((now - (.created_at | fromdateiso8601)) | floor)"'
 if PR_REC=$(gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate --jq "$REC_JQ") \
@@ -667,8 +697,16 @@ cat "$STATE/sensitive.tsv"
 
 有輸出 → 在這張的結果留言（通過、不通過、無法驗證都一樣）加一段
 「⚠️ 本 PR 動到測試或測試指令」，逐行列出（`D` 開頭的標明「刪除」）。這不會讓
-結果變成不通過——改測試、改設定本來就常見——但人類 merge 前要看得到；刪掉測試
-檔、或把測試設定改弱，人類可能就不該 merge。
+結果變成不通過——改測試、改設定本來就常見——只是留下紀錄。2026-10-23 起 merge 由
+merge-poller 自動執行（R21）。merge-poller 不讀這段留言，而是自己依 PR 的 files 清單
+擋下削弱測試的情況（R24'）：刪除測試檔、把測試檔改名成非測試檔、修改
+`analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／`jest.config.*`／
+`vitest.config.*`／`flutter_test_config.dart`（有改就擋），以及 `CLAUDE.md`／`AGENTS.md`
+的 patch `+`／`-` 行出現測試或檢查指令字樣（`flutter test`、`pytest`、`測試指令` 這類，
+不分大小寫；只改設計紀錄不擋）；把檔案 rename 成或 rename 出 `CLAUDE.md`／`AGENTS.md`
+也擋（等於新增或拿掉一份測試指令來源，純 rename 看不出內容）。命中就不 merge、升級 `needs-human`；GitHub 沒給 patch 的文字檔也擋，二進位
+asset 不擋。一般的新增或修改測試不擋。這段列表給人類看是哪些檔、事後稽核用。
+（2026-10-17 版本寫的是「人類 merge 前要看得到」，那時 merge 由人類按。）
 
 **逐一執行**：每個指令都照這個模式跑，把 exit code 與 log 存進狀態目錄：
 
@@ -762,7 +800,7 @@ done
 
 沒印出 `WT_REMOVED` → 記進摘要（不影響驗收結果；下一輪 6a 會先清掉同名殘留）。
 
-### 7. 合併條件與最後確認（spec D 的條件，依序）
+### 7. 合併條件與最後確認（2026-10-17 spec D 的條件，依序）
 
 **最後確認（寫任何結果之前）**：重讀一次 PR：
 
@@ -779,20 +817,25 @@ cat "$STATE/pr_final.txt"
 這張跳過，下一輪對新的 SHA 重驗。結果一定要綁在真的被驗過的那個 commit 上。
 `mergeable` 變成 `UNKNOWN` → 一樣什麼都不貼，下一輪再看。
 
-設計（spec D）原本規定全部成立才 merge 的五個條件，這一版**照樣依序檢查、寫進
-結果**，只是最後不 merge（條件 4 用上面 `pr_final.txt` 的值）：
+2026-10-17 設計（spec D）規定的五個合併條件，本 skill **照樣依序檢查、寫進
+結果**，但本 skill 不 merge（條件 4 用上面 `pr_final.txt` 的值）。merge 由主機端
+merge-poller 依它自己的條件（2026-10-23 spec B1）另外判斷，這裡寫的結果是給人類看的
+紀錄，merge-poller 讀首行、head SHA 與 PR files（另外也看人類 `wm4n` 在目前 head 上的
+Request changes：有就不 merge，R27）：
 
 1. PR 作者是 bot 帳號（`wman-dev`／`wman-review`）、repo 在白名單、issue 沒有
-   `needs-human`。**作者不是 bot 帳號不擋「通過」留言**（人類本來就要自己 merge），
-   但要在結果裡寫「條件 1 不成立：PR 作者是 <login>」，而且不通過時不送回（見
-   步驟 8b）。例：`chainbreak#82` 的 PR #93 作者是 `wm4n`（帳號分離前開的，body
-   雖然簽 Rick），就走這條。
+   `needs-human`。**作者不是 bot 帳號不擋「通過」留言**，但要在結果裡寫「條件 1
+   不成立：PR 作者是 <login>」，而且不通過時不送回（見步驟 8b）。merge-poller 只
+   merge bot 作者的 PR（B1 條件 1），所以這種 PR 通過後仍由人類自己 merge；超過 12
+   小時沒 merge，human-notifier 會提醒一次。例：`chainbreak#82` 的 PR #93 作者是
+   `wm4n`（帳號分離前開的，body 雖然簽 Rick），就走這條。
 2. 驗收對應的是 PR **目前的** head SHA——上面的最後確認。
 3. Summer 自跑的測試全部 exit 0（步驟 6）。
 4. 能合併：`mergeable` 是 `MERGEABLE`。`CONFLICTING`（`mergeStateStatus` 為
    `DIRTY`）→ 有衝突，算不通過，要求作者 rebase 到 PR 的 base 分支（`$STATE/base_ref`）最新版。其他
    `mergeStateStatus` 值照實寫進結果。
-5. 每輪最多 merge 一張——這一版不自動 merge，寫「不適用（自動 merge 暫緩）」。
+5. 每輪最多 merge 一張——本 skill 不 merge，寫「不適用：本 skill 不 merge；
+   merge-poller 每個 repo 每天最多 3 張」。
 
 ### 8. 依結果寫回
 
@@ -816,7 +859,7 @@ cat "$STATE/pr_final.txt"
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 {
-printf '## 驗收結果：通過（待人類 merge）\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
+printf '## 驗收結果：通過（待自動 merge）\n\nhead SHA：%s\n\n' "$(cat "$STATE/head_sha")"
 cat <<'EOF'
 對照 issue #<N> 的驗收基準：<「✅ 需求共識」（附連結）／基準較弱（沒有 grill 共識）：<列出用了哪些來源>>
 
@@ -831,11 +874,11 @@ cat <<'EOF'
 2. head SHA：測試前後讀到的是同一個 commit
 3. 自跑測試：全部 exit 0（見下方）
 4. 可合併：mergeable=MERGEABLE，mergeStateStatus=<值>
-5. 每輪最多 merge 一張：不適用（自動 merge 暫緩）
+5. 每輪最多 merge 一張：不適用：本 skill 不 merge；merge-poller 每個 repo 每天最多 3 張
 EOF
 # PR 動到測試或測試指令（6b 產生的清單），有才印
 if [ -s "$STATE/sensitive.tsv" ]; then
-  printf '\n### ⚠️ 本 PR 動到測試或測試指令（merge 前請確認）\n\n'
+  printf '\n### ⚠️ 本 PR 動到測試或測試指令（刪除或改名測試檔、改測試設定、CLAUDE.md／AGENTS.md 動到測試指令字樣會由 merge-poller 擋下）\n\n'
   awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
 fi
 printf '\n### 測試（指令來源：%s；在上面那個 head SHA 的乾淨 checkout 執行）\n' "$( [ -s "$STATE/test_source" ] && cat "$STATE/test_source" || printf '未知' )"
@@ -844,14 +887,15 @@ while IFS="$(printf '\t')" read -r NAME RC CMD; do
   tail -n 15 "$STATE/$NAME.log"
   printf '~~~\n'
 done < "$STATE/tests.tsv"
-# Summer 之前在舊 commit 上送過 Request changes 的話，寫明這則結果取代它
+# Summer 之前在舊 commit 上送過驗收的 Request changes 的話，寫明這則結果取代它
+# （merge-poller 的衝突 review 不是驗收送回，排除）
 if gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
-  --jq '.[] | select(.user.login == "wman-pm" and .state == "CHANGES_REQUESTED") | .id' | grep -q .; then
-  printf '\n本結果取代 Summer 先前在舊 commit 上送出的 Request changes：那些項目已在上面這個 head SHA 重新驗過。GitHub 上那則 review 仍會顯示「Changes requested」，人類 merge 前可直接 dismiss。\n'
+  --jq '.[] | select(.user.login == "wman-pm" and .state == "CHANGES_REQUESTED") | select((.body // "") | split("\n") | (.[0] // "") | gsub("^[\t \u00a0\u3000]+"; "") | startswith("## 自動 merge 受阻：與 main 衝突") | not) | .id' | grep -q .; then
+  printf '\n本結果取代 Summer 先前在舊 commit 上送出的 Request changes：那些項目已在上面這個 head SHA 重新驗過。GitHub 上那則 review 仍會顯示「Changes requested」；自動 merge 看的是本則結果與 head SHA，不看 Summer 的 review 狀態（2026-10-23 spec B1；只有人類 wm4n 綁在目前 head 的 Request changes 會擋，R27）。\n'
 fi
 cat <<'EOF'
 
-自動 approve＋merge 暫緩中（等人類決定是否開放），請人類確認本結果後 merge。<有 ❓ 時加一句：merge 前請先實機確認標 ❓ 的條目。>
+本 skill 不 approve、不 merge：主機端 merge-poller 會依本結果與上面的 head SHA 自動 squash merge。<有 ❓ 時加一句：標 ❓ 的條目需要人類實機確認，自動 merge 不會等這一步；每日 merge 摘要會標出含 ❓ 的 merge，請在 merge 後實機確認，有問題再開 issue 或 revert。>
 EOF
 printf '\n---\n— By Summer (acceptance-review)\n'
 } | gh pr comment "$PR_NUM" --repo "$REPO" --body-file -
@@ -862,7 +906,7 @@ printf '\n---\n— By Summer (acceptance-review)\n'
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
-  --jq ".[] | select(.user.login == \"wman-pm\" and (.body | startswith(\"## 驗收結果：通過（待人類 merge）\")) and (.body | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
+  --jq ".[] | select(.user.login == \"wman-pm\" and ((.body // \"\") | startswith(\"## 驗收結果：通過（待自動 merge）\")) and ((.body // \"\") | contains(\"head SHA：$(cat "$STATE/head_sha")\"))) | .html_url"
 ```
 
 沒有輸出 → 失敗，不做第 2 步，記進摘要（下一輪沒有紀錄會重驗）。
@@ -872,17 +916,18 @@ gh api "repos/$REPO/issues/$PR_NUM/comments" --paginate \
 ```bash
 STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
 {
-printf '驗收通過，待人類 merge：%s（head SHA %s）\n' '<第 1 步的留言網址>' "$(cut -c1-7 "$STATE/head_sha")"
+printf '驗收通過，待自動 merge：%s（head SHA %s）\n' '<第 1 步的留言網址>' "$(cut -c1-7 "$STATE/head_sha")"
 printf '\n— By Summer (acceptance-review)\n'
 } | gh issue comment "$NUM" --repo "$REPO" --body-file -
 ```
 
 失敗 → 記進摘要，不重試（PR 上的結果已經在，下一輪冪等跳過，不會補貼）。
 
-**第 3 步：不要自己 @ 人類**（2026-10-17 改，R17）。第 1 步那則
-`## 驗收結果：通過（待人類 merge）` 一貼上，主機端 `human-notifier.sh` 就會在
-`bot-notify` @ 人類一次並附留言連結。同一個 SHA 只會通過一次，所以每張 PR 只會
-因此被通知一次。本輪摘要照常列出（不帶 @）。
+**第 3 步：不要自己 @ 人類，也不 merge**。第 1 步那則
+`## 驗收結果：通過（待自動 merge）` 一貼上，就交給主機端 `merge-poller.sh` 依它的
+條件 merge（R21）；通過不需要人類動作，`human-notifier.sh` 不通知，只在這則留言
+超過 12 小時 PR 仍 open 時 @ 人類一次（pass-stale）。本輪摘要照常列出（不帶 @）。
+（🕘 2026-10-17 到 2026-10-23：舊標題一貼上，human-notifier 就 @ 人類去 merge。）
 
 **issue 的 `agent-done` 不動**：merge 之後 PR 的 `Closes #` 會自動關閉 issue。
 
@@ -1072,8 +1117,9 @@ review 觸發，跟這裡補不補記無關），只把紀錄補上：
 
    ```bash
    STATE="/tmp/acceptance-review/${OWNER}-${REPO_NAME}-${NUM}"
+   # 跟 3a (2) 一樣排除 merge-poller 的衝突 review
    gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
-     --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$(cat "$STATE/head_sha")\") | \"\(.submitted_at)\n\(.body)\n----\""
+     --jq ".[] | select(.user.login == \"wman-pm\" and .state == \"CHANGES_REQUESTED\" and .commit_id == \"$(cat "$STATE/head_sha")\") | select((.body // \"\") | split(\"\n\") | (.[0] // \"\") | gsub(\"^[\t \u00a0\u3000]+\"; \"\") | startswith(\"## 自動 merge 受阻：與 main 衝突\") | not) | \"\(.submitted_at)\n\(.body)\n----\""
    ```
 
 3. （2026-10-17 移除原本的「先補觸發，只在作者還沒回應時」：觸發改由主機端
@@ -1233,9 +1279,12 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
 
 ## 鐵則
 
-- **永不 approve、永不 merge**：自動 approve＋merge 暫緩，等人類決定是否開放
-  （2026-10-17，安全分類器以「Merge Without Review」擋下）。通過時只貼結果，
-  由 `human-notifier.sh` 通知人類 merge。Request changes 不是 approve，可以送。
+- **本 skill 永不 approve、永不 merge**：通過時只貼結果，merge 由主機端
+  `merge-poller.sh` 依結果與 head SHA 自動執行（2026-10-23 R21，不在本 skill）。
+  Request changes 不是 approve，可以送。
+- **merge-poller 寫的東西不是本 skill 的紀錄**：首行 `## 自動 merge 受阻：與 main 衝突`
+  的 Request changes、第二行是費用或權限風險的 needs-human 留言，讀送回與升級紀錄時
+  一律排除（3a、8a、8d）。
 - **驗收要有可檢查的證據**：逐條依據加 Summer 自己在 PR head 跑的測試。測試
   跑不起來、或拿不到測試指令，絕不當通過，也不跳過。
 - **head 失敗先對 base 跑同一組指令**（R18）：base 也紅歸「無法驗證（基線紅）」，
@@ -1279,10 +1328,34 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
 - **Summer 的測試環境還沒實機驗證過**：Summer 容器裝了 mise＋Flutter，但沒
   確認過能在 PR checkout 裡跑完 `flutter test`。跑不起來時本 skill 走「無法驗證
   （測試環境）」（human-notifier 會通知人類），不會誤判通過。
-- **送回與通知依賴 Mac mini 上的兩支 poller**（R17）：`pr-review-poller.sh` 沒在
-  跑，送回的 review 不會有人觸發作者——R3' 在 16 小時後貼停滯通報當備援；
-  `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
-  摘要（不帶 @）。上線 runbook 要先確認兩支 cron 都在跑。
+- **送回、通知與 merge 依賴 Mac mini 上的三支 poller**（R17、R21）：
+  - `pr-review-poller.sh` 沒在跑，送回的 review 不會有人觸發作者——R3' 在 16 小時後
+    貼停滯通報當備援。
+  - `human-notifier.sh` 沒在跑，固定標題與 `needs-human` 都不會有人 @ 人類，只剩本輪
+    摘要（不帶 @）。
+  - `merge-poller.sh` 沒在跑（包括回滾拿掉 cron 之後），通過的 PR 就停在 open；
+    `human-notifier.sh` 會在通過留言超過 12 小時後 @ 人類一次（pass-stale），由人類
+    自己 merge。
+  上線 runbook 要先確認三支 cron 都在跑。
+- **❓ 條目不擋自動 merge**（2026-10-23 起，R24）：❓ 是只能在實機確認的條目，擋下
+  所有含 ❓ 的 PR 會讓 UI 類的工作全部回到等人類。通過的條件沒有改（spec B2「其他內容
+  不變」），所以有 ❓ 的 PR 一樣會被自動 merge；每日 merge 摘要會標出含 ❓ 的 merge，
+  由人類事後實機確認。
+- **削弱測試由 merge-poller 擋，不由本 skill 擋**（R24'）：
+  - 有改就擋：刪除測試檔、測試檔改名成非測試檔、修改 `analysis_options.yaml`／
+    `dart_test.yaml`／`pytest.ini`／`jest.config.*`／`vitest.config.*`／
+    `flutter_test_config.dart`（R25）。
+  - 把檔案 rename 成或 rename 出 `CLAUDE.md`／`AGENTS.md` 也擋：等於新增或拿掉一份測試
+    指令來源，純 rename 沒有 patch、看不出內容。
+  - `CLAUDE.md`／`AGENTS.md` 只在 patch 的 `+`／`-` 行出現測試或檢查指令字樣時才擋：
+    `flutter test`、`flutter analyze`、`dart test`、`dart analyze`、`npm test`、
+    `npm run test`、`pnpm test`、`yarn test`、`pytest`、`unittest`、`node --test`、
+    `jest`、`vitest`、`make test`、`測試指令`、`test command`（不分大小寫）。只改設計
+    紀錄不擋。
+  - GitHub 沒提供 patch 的文字檔也擋；二進位 asset 不擋。
+  - 命中就升級 `needs-human`，誤擋由人類移除 label 放行。一般的新增或修改測試不擋——
+    測試內容改弱（例如把 assert 改鬆）、或在 `CLAUDE.md` 用不在清單裡的寫法改掉測試
+    指令，都比對不出來，只能靠 6b 的列表讓人類事後看。
 - **不在 human-notifier 通知範圍內、只會出現在摘要的事**（摘要不帶 @，人類不會被
   叫）：缺 `needs-human` label、gh 帳號不是 `wman-pm`。前者是上線前置的問題，後者
   發生時 Summer 什麼都寫不進 GitHub，也沒有東西可通知。接受；runbook 的上線步驟會先

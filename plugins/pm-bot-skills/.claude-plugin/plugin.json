@@ -1,8 +1,8 @@
 {
   "$schema": "https://claude.ai/schemas/plugin.json",
   "name": "pm-bot-skills",
-  "version": "1.1.0",
-  "description": "product manager bot 專用 skill（目前只有 Summer 裝）：規劃需求並開 issue 或收養人類的單、回答 grill 逼問、backlog 排序並自己放行 ready-for-agent（受 WIP 與重做上限約束）、PR 需求驗收並自跑測試、定期進度回報",
+  "version": "1.2.0",
+  "description": "product manager bot 專用 skill（目前只有 Summer 裝）：規劃需求並開提案 PR 讓人類審方向（依 review 修改提案、核准後開 issue）或收養人類的單、回答 grill 逼問、backlog 排序並自己放行 ready-for-agent（受 WIP 與重做上限約束）、PR 需求驗收並自跑測試（通過後由主機端自動 merge）、定期進度回報",
   "author": {
     "name": "William Chao",
     "email": "wmandev@gmail.com"
