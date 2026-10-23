@@ -701,9 +701,10 @@ cat "$STATE/sensitive.tsv"
 merge-poller 自動執行（R21）。merge-poller 不讀這段留言，而是自己依 PR 的 files 清單
 擋下削弱測試的情況（R24'）：刪除測試檔、把測試檔改名成非測試檔、修改
 `analysis_options.yaml`／`dart_test.yaml`／`pytest.ini`／`jest.config.*`／
-`vitest.config.*`（有改就擋），以及 `CLAUDE.md`／`AGENTS.md` 的 patch `+`／`-` 行出現
-測試或檢查指令字樣（`flutter test`、`pytest`、`測試指令` 這類，不分大小寫；只改設計
-紀錄不擋）。命中就不 merge、升級 `needs-human`；GitHub 沒給 patch 的文字檔也擋，二進位
+`vitest.config.*`／`flutter_test_config.dart`（有改就擋），以及 `CLAUDE.md`／`AGENTS.md`
+的 patch `+`／`-` 行出現測試或檢查指令字樣（`flutter test`、`pytest`、`測試指令` 這類，
+不分大小寫；只改設計紀錄不擋）；把檔案 rename 成或 rename 出 `CLAUDE.md`／`AGENTS.md`
+也擋（等於新增或拿掉一份測試指令來源，純 rename 看不出內容）。命中就不 merge、升級 `needs-human`；GitHub 沒給 patch 的文字檔也擋，二進位
 asset 不擋。一般的新增或修改測試不擋。這段列表給人類看是哪些檔、事後稽核用。
 （2026-10-17 版本寫的是「人類 merge 前要看得到」，那時 merge 由人類按。）
 
@@ -819,7 +820,8 @@ cat "$STATE/pr_final.txt"
 2026-10-17 設計（spec D）規定的五個合併條件，本 skill **照樣依序檢查、寫進
 結果**，但本 skill 不 merge（條件 4 用上面 `pr_final.txt` 的值）。merge 由主機端
 merge-poller 依它自己的條件（2026-10-23 spec B1）另外判斷，這裡寫的結果是給人類看的
-紀錄，merge-poller 只讀首行與 `head SHA：`：
+紀錄，merge-poller 讀首行、head SHA 與 PR files（另外也看人類 `wm4n` 在目前 head 上的
+Request changes：有就不 merge，R27）：
 
 1. PR 作者是 bot 帳號（`wman-dev`／`wman-review`）、repo 在白名單、issue 沒有
    `needs-human`。**作者不是 bot 帳號不擋「通過」留言**，但要在結果裡寫「條件 1
@@ -876,7 +878,7 @@ cat <<'EOF'
 EOF
 # PR 動到測試或測試指令（6b 產生的清單），有才印
 if [ -s "$STATE/sensitive.tsv" ]; then
-  printf '\n### ⚠️ 本 PR 動到測試或測試指令（刪除或改名測試檔、改測試設定會由 merge-poller 擋下）\n\n'
+  printf '\n### ⚠️ 本 PR 動到測試或測試指令（刪除或改名測試檔、改測試設定、CLAUDE.md／AGENTS.md 動到測試指令字樣會由 merge-poller 擋下）\n\n'
   awk -F '\t' '{printf "- %s `%s`\n", ($1 == "D" ? "刪除" : $1), $NF}' "$STATE/sensitive.tsv"
 fi
 printf '\n### 測試（指令來源：%s；在上面那個 head SHA 的乾淨 checkout 執行）\n' "$( [ -s "$STATE/test_source" ] && cat "$STATE/test_source" || printf '未知' )"
@@ -889,7 +891,7 @@ done < "$STATE/tests.tsv"
 # （merge-poller 的衝突 review 不是驗收送回，排除）
 if gh api "repos/$REPO/pulls/$PR_NUM/reviews" --paginate \
   --jq '.[] | select(.user.login == "wman-pm" and .state == "CHANGES_REQUESTED") | select((.body // "") | split("\n") | (.[0] // "") | gsub("^[\t \u00a0\u3000]+"; "") | startswith("## 自動 merge 受阻：與 main 衝突") | not) | .id' | grep -q .; then
-  printf '\n本結果取代 Summer 先前在舊 commit 上送出的 Request changes：那些項目已在上面這個 head SHA 重新驗過。GitHub 上那則 review 仍會顯示「Changes requested」；自動 merge 看的是本則結果與 head SHA，不看 review 狀態（2026-10-23 spec B1）。\n'
+  printf '\n本結果取代 Summer 先前在舊 commit 上送出的 Request changes：那些項目已在上面這個 head SHA 重新驗過。GitHub 上那則 review 仍會顯示「Changes requested」；自動 merge 看的是本則結果與 head SHA，不看 Summer 的 review 狀態（2026-10-23 spec B1；只有人類 wm4n 綁在目前 head 的 Request changes 會擋，R27）。\n'
 fi
 cat <<'EOF'
 
@@ -1341,7 +1343,10 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   由人類事後實機確認。
 - **削弱測試由 merge-poller 擋，不由本 skill 擋**（R24'）：
   - 有改就擋：刪除測試檔、測試檔改名成非測試檔、修改 `analysis_options.yaml`／
-    `dart_test.yaml`／`pytest.ini`／`jest.config.*`／`vitest.config.*`。
+    `dart_test.yaml`／`pytest.ini`／`jest.config.*`／`vitest.config.*`／
+    `flutter_test_config.dart`（R25）。
+  - 把檔案 rename 成或 rename 出 `CLAUDE.md`／`AGENTS.md` 也擋：等於新增或拿掉一份測試
+    指令來源，純 rename 沒有 patch、看不出內容。
   - `CLAUDE.md`／`AGENTS.md` 只在 patch 的 `+`／`-` 行出現測試或檢查指令字樣時才擋：
     `flutter test`、`flutter analyze`、`dart test`、`dart analyze`、`npm test`、
     `npm run test`、`pnpm test`、`yarn test`、`pytest`、`unittest`、`node --test`、

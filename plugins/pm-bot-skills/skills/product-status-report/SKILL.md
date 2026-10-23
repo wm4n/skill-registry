@@ -91,14 +91,20 @@ gh issue list --repo wm4n/hangman    --state open --json number,labels --limit 2
 ### 4. 本期 merged PR
 
 ```bash
-gh pr list --repo wm4n/chainbreak --state merged --limit 30 --json number,title,mergedAt
-gh pr list --repo wm4n/hangman    --state merged --limit 30 --json number,title,mergedAt
+for R in wm4n/chainbreak wm4n/hangman; do
+  echo "== $R"
+  gh pr list --repo "$R" --state merged --limit 30 \
+    --json number,title,mergedAt,author,headRefName \
+    --jq '.[] | (if ((.author.login // "") == "wman-pm" and ((.headRefName // "") | startswith("proposal/"))) then "proposal" else "code" end) + "\t#\(.number)\t\(.mergedAt)\t\(.title)"'
+done
 ```
 
-只保留 `mergedAt` 落在 `$CUTOFF_DATE` 之後的項目（讀 JSON 直接比對，
-不需要額外工具）。`--limit 30` 是抓寬一點的安全邊界；若剛好 30 筆全部
-落在區間內，代表這期間量異常大，在回報裡註明「merged 數量達查詢上限
-30，實際可能更多」，不要默默漏算。
+每行第一欄是 `code` 或 `proposal`。`proposal` 是提案 PR（作者 `wman-pm`、
+分支 `proposal/` 開頭）：merge 的是方向，不是程式碼，**不算進「Merged」
+的張數**，另列在模板的「提案」那一行。兩者都只保留 `mergedAt` 落在
+`$CUTOFF_DATE` 之後的項目（直接比對第三欄，不需要額外工具）。`--limit 30` 是抓寬一點的安全邊界，程式 PR 與提案 PR 共用這 30 筆；若
+剛好 30 筆全部落在區間內，代表這期間量異常大，在回報裡註明「merged 數量
+達查詢上限 30，實際可能更多」，不要默默漏算。
 
 ### 5. 卡單與 `agent-failed` 清單
 
@@ -128,7 +134,8 @@ emoji、換行、markdown 符號）在 2000 字元以內。逼近或超過上限
 下面順序砍到符合為止，**不要整段從頭改寫**：
 
 1. 先砍「下期建議」的細節，只留一句話結論。
-2. merged PR 只列數量與代表性的 2–3 個編號，其餘寫「其餘 N 個略」。
+2. merged PR 只列數量與代表性的 2–3 個編號，其餘寫「其餘 N 個略」；
+   提案那一行只留張數。
 3. 卡單／`agent-failed` 清單每個產品最多列 3 張，其餘寫「還有 N 張，
    詳見 GitHub 對應 label」。
 4. 仍然超過 → GA4 指標只留最關鍵的 1 個數字，其餘訊號留到下次或另外
@@ -144,6 +151,7 @@ GA4：<核心指標 1–2 個，例如「活躍使用者 -12%、結算完成率 
 Backlog：grill-me 1／grill-me-active 0／grill-me-done 2／
 ready-for-agent 1／agent-active 1／agent-done 0／agent-failed 1
 Merged：3 個（#101 #103 #107）
+提案：merge 1 張（#12）
 卡單：agent-failed 1 張（#88）；疑似卡住 0 張
 
 **Hangman**
@@ -151,6 +159,7 @@ GA4：<核心指標>
 Backlog：grill-me 0／grill-me-active 1／grill-me-done 0／
 ready-for-agent 0／agent-active 2／agent-done 1／agent-failed 0
 Merged：1 個（#19）
+提案：merge 0 張
 卡單：agent-failed 0 張；疑似卡住 1 張（#22，逾 30 小時未更新，
 建議核實 pod 狀態）
 
@@ -203,7 +212,8 @@ merged PR 或卡單張數變多，每一項都在往上加，範例看起來精�
   skill 不額外偵測或修正。
 - **merged PR 統計靠 `--limit 30` 抓寬邊界，不是精確分頁查詢**：查詢
   期間內 merged 數量正常情況遠低於 30，超過時回報裡會註明「達查詢
-  上限」，但不會自動翻頁抓完整清單。
+  上限」，但不會自動翻頁抓完整清單。2026-10-23 起提案 PR 也會被
+  merge，與程式 PR 共用這 30 筆，量大時比以前更早撞到上限。
 - **`agent-active` 逾時只是訊號，不是已核實的事實**：跟
   `backlog-triage` 段 3 相同的限制——Summer 看不到 Mac mini／k3s 上
   實際的 pod 狀態，`updatedAt` 逾時多數情況代表卡住，但也可能只是
