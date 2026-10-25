@@ -4,9 +4,11 @@ argument-hint: "[<owner/repo>#<N>]"
 description: >-
   驗收 agent-done issue 對應的 PR：逐條核對驗收條件，並在 PR head 的乾淨
   checkout 自己跑 base branch 的 CLAUDE.md 規定的測試（Flutter 至少 flutter
-  analyze、flutter test；環境跑不起來算無法驗證、絕不當通過）。由 usercron 觸發（訊息「執行
-  acceptance-review skill」，sender_name＝SummerAcceptance，時程
-  30 9-21 * * *，以 CRONJOB.md 為準），或人類在 Discord 提出同類請求（如
+  analyze、flutter test；環境跑不起來算無法驗證、絕不當通過）。平時由主機端
+  acceptance-poller 指名單張觸發（訊息「執行 acceptance-review skill，參數：
+  <owner/repo>#<N>」，PR 的目前 head SHA 還沒驗收才叫），另有 usercron 安全網
+  （sender_name＝SummerAcceptance，時程 30 10,14,18 * * *，以 CRONJOB.md 為準），
+  或人類在 Discord 提出同類請求（如
   「驗收一下」「這張 PR 符合需求嗎」）時觸發。驗收基準三層：「✅ 需求
   共識」→ issue body 驗收條件段、Summer 規格修正段與 wm4n 留言（標「基準
   較弱」）→ 都沒有就貼 needs-human 找人決定基準，只報一次。通過 → 在 PR
@@ -89,9 +91,12 @@ gh issue list --repo wm4n/hangman    --label agent-done --state open --limit 200
   --json number,title,body,labels,author,comments
 ```
 
-排程是 usercron `30 9-21 * * *`（每天 09:30–21:30 每小時一次，時程以 `openab-ops` 的
-`CRONJOB.md` 為準）。一天跑 13 次，所以**同一個 head SHA 只驗一次**（見
-步驟 3 的 R4），Discord 也只報有變化的事（見「Discord」）。
+觸發來源有兩個（2026-10-25 起，openab-ops Ruling R28）：主機端 `acceptance-poller.sh` 在某張
+agent-done 單對應 PR 的目前 head SHA 還沒有驗收紀錄時，用 `<owner/repo>#<N>` 指名觸發（一次一張）；
+usercron `30 10,14,18 * * *` 是安全網，掃全部（時程以 `openab-ops` 的 `CRONJOB.md` 為準）。兩者
+都可能對同一張單跑很多次，所以**同一個 head SHA 只驗一次**（見步驟 3 的 R4），Discord 也只報有變化的事
+（見「Discord」）。poller 只叫未驗的 SHA，不會用指名觸發去重驗「無法驗證」，R4 那條指名例外仍只給人類用。
+（🕘 2026-10-17 至 2026-10-25 是 usercron `30 9-21 * * *` 每小時一次、一天 13 次。）
 
 ### ⚠️ 先把參數拆開：`gh` 不吃 `owner/repo#N`
 
@@ -1262,7 +1267,7 @@ echo "rework=$REWORK failed=$FAILED_N reject=$REJECT_N"
 （與 `needs-human` label）讓主機端 `human-notifier.sh` 通知；觸發作者靠 Request
 changes review 讓 `pr-review-poller.sh` 發。
 
-一天跑 13 次，**只報有變化的事**，沒變化就不要每小時重報一樣的清單。**本輪摘要**
+同一張單可能被觸發很多次，**只報有變化的事**，沒變化就不要每次重報一樣的清單。**本輪摘要**
 （回在觸發這一輪的地方，不帶任何 @）：本輪寫了什麼（通過、不通過、送回、續做送回、
 升級、無法驗證（測試環境／基線紅）、通報停滯）、異常（GraphQL 報錯、找不到 PR、
 多個候選 PR、步驟 3a 或重做次數查詢失敗、SHA 中途變動）、寫入失敗、**需要人類處理
@@ -1405,8 +1410,8 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   第 5 類這時也還沒貼不通過留言，人類移除 label 後同一個 SHA 會再驗一次、再升級
   一次，機率極低，接受。
 - **找 PR 依賴 `Closes #N`**：沒寫時退到留言比對，兩者都落空才是「異常」。
-- **usercron 必須設定 `timezone = "Asia/Taipei"`**：`30 9-21 * * *` 要以台北時間
+- **usercron 必須設定 `timezone = "Asia/Taipei"`**：`30 10,14,18 * * *` 要以台北時間
   解讀。`timezone` 不設的話預設是 UTC（`CRONJOB.md` 欄位表），整個排程差 8 小時，
-  會跑在台北時間 17:30–05:30。部署時在 `cronjob.toml` 確認這一項（時程與設定以
+  會跑在台北時間 18:30、22:30、02:30。部署時在 `cronjob.toml` 確認這一項（時程與設定以
   `openab-ops` 的 `CRONJOB.md` 為準）。（2026-10-17 起本 skill 不再依賴「09 點那
   一輪」，見預檢段落的說明。）
