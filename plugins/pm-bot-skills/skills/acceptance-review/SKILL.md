@@ -1109,6 +1109,37 @@ printf '\n---\n— By Summer (acceptance-review)\n'
 跳過（R4）；base 修好之後**不會自動重驗**同一個 head SHA——要人類指名，或作者
 rebase 讓 SHA 變。
 
+**貼完基線紅之後，開一張修 main 的單（openab-ops#25 甲，2026-11-07）**——人類的方向是
+「基線紅視同 bug，走一般開發流程」，人類只管方向與花錢。**去重在前**：同一個 repo
+已經有 open 的、帶 `baseline-red` 的 issue 就**不要再開**，只在那張 issue 補一則留言，
+附這次也撞到的 PR 連結（多張 PR 會各自回報同一次基線紅，只能有一張單）。
+
+```bash
+BR_OPEN=$(gh issue list --repo "$REPO" --label baseline-red --state open --json number,title \
+  --jq '[.[] | select(.title | startswith("[基線紅]"))] | .[0].number // empty') || BR_OPEN="ERR"
+if [ "$BR_OPEN" = "ERR" ]; then
+  : # 查不到就不開（寧可漏一張也不要重複開）；摘要記「基線紅開單失敗」，下一次指名重驗再處理
+elif [ -n "$BR_OPEN" ]; then
+  printf '另一張 PR 也撞到同一次基線紅：#%s（head SHA %s）\n\n— By Summer (acceptance-review)\n' "$PR_NUM" "$(cut -c1-7 "$STATE/head_sha")" \
+    | gh issue comment "$BR_OPEN" --repo "$REPO" --body-file -
+else
+  FIRST_CMD=$(awk -F '\t' '$2 != 0 {print $3; exit}' "$STATE/base-tests.tsv")
+  {
+    printf '## 目標\n\n`%s` 的 base branch（`%s` @ %s）測試是紅的，修到全綠。\n\n' "$REPO" "$(cat "$STATE/base_ref")" "$(cut -c1-7 "$STATE/base_sha")"
+    printf '## 驗收條件\n\n- 在 `%s` 上跑下列指令全綠（base 與 PR head 先前都失敗）：\n' "$(cat "$STATE/base_ref")"
+    awk -F '\t' '$2 != 0 {printf "  - `%s`\n", $3}' "$STATE/base-tests.tsv"
+    printf '\n## 背景\n\n由 PR #%s 的驗收發現（見該 PR 的「無法驗證（基線紅）」留言，有 base 的輸出結尾）。這是維修單：不走 grill、不走提案，直接放行；`agent-dev-poller` 會讓帶 `baseline-red` 的單排在所有一般單前面。\n\n---\n— By Summer (acceptance-review)\n' "$PR_NUM"
+  } | gh issue create --repo "$REPO" --title "[基線紅] ${REPO} main 測試失敗：${FIRST_CMD:-見內文}" \
+        --label baseline-red --label ready-for-agent --body-file -
+fi
+```
+
+- 標題前綴 `[基線紅]` 與 label `baseline-red` 是和 openab-ops 接收側的約定（`agent-dev-poller` 認領排序、`merge-poller` 熔斷期間放行與「base 修好後 update-branch」都靠它），改任一邊要兩邊一起改。
+- **直接貼 `ready-for-agent`，不貼 `grill-me`**（驗收條件明確）；這是 Summer 自己貼的放行，WIP 上限不在這裡檢查，也不繞過——`backlog-triage` 的 WIP 管的是它自己的放行，這張維修單的優先靠 poller 的認領排序。
+- 兩個 repo 要先有 `baseline-red` label（`gh label list --repo "$REPO" | grep baseline-red`）；沒有就 `gh issue create` 會失敗，摘要記「基線紅開單失敗：缺 label」，**不要自己建 label**。
+- 開單失敗（查不到、缺 label、API 錯誤）不影響已貼出的基線紅留言，也不重試；摘要寫出來，人類看得到。
+- 帶 `needs-human` 的單與 PR 照舊一律不動（上面的 R4 預檢已跳過）。
+
 #### 8d. 續做送回（步驟 3 的 R2）
 
 上一輪在這個 SHA 送了 Request changes（送回已完成），之後的不通過留言沒貼成。
@@ -1400,7 +1431,8 @@ issue（逐張點名）**。只有跳過的時候，回一行就好：「accepta
   但它**不會通過**，human-notifier 會通知人類；base 修好後重驗就看得出來。
 - **基線紅之後 base 修好，同一個 head SHA 不會自動重驗**（R18）：R4 對
   `## 驗收結果：無法驗證（基線紅）` 只在人類指名時重驗；作者 rebase 讓 SHA 變了，
-  下一輪也會重驗。
+  下一輪也會重驗。2026-11-07 起（openab-ops#25）：修 main 的 `baseline-red` 單關閉後，
+  主機端 `merge-poller` 會對被卡的 PR 做 update-branch，產生新 SHA 就由 acceptance-poller 重驗。
 - **通過後 issue 那行連結貼失敗不會補**：PR 上的結果已經在，下一輪冪等跳過。
 - **第 5 類升級後，人類移除 label、PR head 沒變**：本 skill 一直跳過這個 SHA，
   後續（送回、自己修、關 PR）完全由人類決定。
