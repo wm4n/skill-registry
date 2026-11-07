@@ -3,14 +3,14 @@ name: backlog-triage
 argument-hint: "[<owner/repo>#<N>]"
 description: >-
   排序 grill-me-done 待辦並自己放行 ready-for-agent、修復 agent-failed 規格
-  後自己放行重做、列出 poller 已升級與等人類決定的單。由 usercron 平日觸發
+  後自己放行重做、列出 poller 已升級與等人類決定的單。由 usercron 定期觸發
   （訊息「執行 backlog-triage skill」，sender_name＝SummerTriage，時程以
   CRONJOB.md 為準），或人類在 Discord 提出同類請求（如「排一下優先序」
   「看看卡住的單」「這張能改回去了嗎」）時觸發。放行不等人類點頭，但每次
   放行前必查三道限制：落在 needs-human 五類就改貼 needs-human 並留言說明、
   重做次數（agent-failed 次數加驗收不通過次數）達 2 就改貼 needs-human、
   兩個 repo 的 agent-active 加 ready-for-agent，再加被送回重做中的 agent-done
-  合計達 2（WIP 上限）就停止放行。label 一律先加 ready-for-agent 再移除
+  合計達 3（WIP 上限）就停止放行。label 一律先加 ready-for-agent 再移除
   grill-me-done／agent-failed。排序、修規格、放行、升級都在 issue 留言（簽名
   — By Summer），Discord 只放不帶 @ 的摘要（@ 人類由主機端 human-notifier 發）。
   ready-for-human 歸 product-planning，帶 needs-human 的單一律不動。
@@ -32,9 +32,10 @@ description: >-
 >    通過達 2 次，不再自動放行，改貼 `needs-human`（第 5 類）。自動修規格、
 >    自動放行、驗收送回三條路接起來就是一個會一直燒 Rick/Morty 額度的迴圈，
 >    這個上限是那個迴圈的費用防線。
-> 3. **WIP 上限 `WIP_MAX = 2`**：兩個 repo 的 open `agent-active` 加
->    `ready-for-agent`，再加「被驗收送回、正在重做」的 `agent-done`，合計達 2
->    （Rick、Morty 各一張）就停止放行，剩下的留到下一輪。同時開太多張會讓兩隻
+> 3. **WIP 上限 `WIP_MAX = 3`**：兩個 repo 的 open `agent-active` 加
+>    `ready-for-agent`，再加「被驗收送回、正在重做」的 `agent-done`，合計達 3
+>    就停止放行，剩下的留到下一輪（2026-11-08 由 2 改 3，openab-ops Ruling R63：
+>    兩隻 bot 會有一隻同時做兩張；🕘 原本是 2，Rick、Morty 各一張）。同時開太多張會讓兩隻
 >    bot 同時撞用量上限，每張都做不完。
 
 ## 觸發與參數
@@ -358,7 +359,7 @@ echo "WIP=$WIP"
 這裡撈全部 open issue 再用 jq 篩。`break 3` 跳出最外層的 repo 迴圈：任何一個
 查詢失敗，`WIP` 都維持 `FAILED`，不會被後面的加法蓋掉。
 
-- **WIP ≥ 2 → 本輪停止放行**，剩下的單留到下一輪（修規格、升級不受影響）。
+- **WIP ≥ 3 → 本輪停止放行**，剩下的單留到下一輪（修規格、升級不受影響）。
 - **查詢失敗（`WIP=FAILED`）→ 當作已滿，本輪不放行**，摘要寫明。
 - **每放行一張就重查一次**，不要用一開始算的數字一路扣：poller 隨時可能在
   兩次放行之間認領或完成別的單。
@@ -450,7 +451,7 @@ gh issue view "$NUM" --repo "$REPO" --json state,labels,comments
 「重做次數」那整段，確認仍是 `poller_owns=no` 且 `label_state=ok`——人類可能在
 Summer 修規格的這段時間裡回覆了。任一不成立就不放行。
 
-**2. 重查 WIP**（見「WIP」）。≥ 2 或查詢失敗 → 不放行，並結束本輪所有放行。
+**2. 重查 WIP**（見「WIP」）。≥ 3 或查詢失敗 → 不放行，並結束本輪所有放行。
 
 **3. 先加 `ready-for-agent`**：
 
@@ -485,7 +486,7 @@ poller 撿得到它**，也不會有任何錯誤訊息。步驟 4 已經成功�
 - **`SRC`＝`grill-me-done`**：不重試，記進摘要；下一輪段 1 會補做（見段 1
   的「放行做到一半」）。`grill-me-done` 殘留不影響 poller 認領與開發。
 - **`SRC`＝`agent-failed`**：**不能等下一輪**——poller 每 10 分鐘就會認領帶
-  `ready-for-agent` 的單，本 skill 下一輪卻是下一個平日，等到那時單子幾乎一定
+  `ready-for-agent` 的單，本 skill 下一輪最快也是 2 小時後，等到那時單子幾乎一定
   已經變成 `agent-active`＋`agent-failed`。所以當場處理：
   1. 立刻再跑一次移除 `agent-failed`。成功就照常做步驟 6。
   2. 仍失敗 → 用 `gh issue view "$NUM" --repo "$REPO" --json labels` 看現況：
@@ -515,7 +516,7 @@ gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
 放行前檢查：
 - needs-human 五類：不落在任何一類（<一句話理由>）
 - 重做次數：<K>（agent-failed <a> 次＋驗收不通過 <b> 次），上限 2
-- WIP：放行前 <W>，上限 2
+- WIP：放行前 <W>，上限 3
 
 ---
 — By Summer
@@ -547,7 +548,7 @@ comment 只含背景、需求範圍、驗收條件、目標 repo，**不含數�
   --remove-label grill-me-done`，不重留言、不佔 WIP、不重新檢查。
 - 有升級留言、沒有 `needs-human` → 照「人類處理過的升級」判斷（先跑那裡的
   `esc_stage`：grill 期間的升級照一般流程，不算這一條）；判斷為跳過的
-  （人類沒有明確說可以做）不進排序，摘要列一行。不然它每個平日都會收到一則
+  （人類沒有明確說可以做）不進排序，摘要列一行。不然它每一輪都會收到一則
   「第 N 順位」的排序留言，看起來像 Summer 在推一張人類沒放行的單。
 - 在 `comments` 裡找不到 `jira-grill` 貼的「✅ 需求共識」comment → **視為
   異常**，跳過、記錄，不要改看 issue 標題／描述自己臆測需求範圍，那不是共識
@@ -597,7 +598,7 @@ EOF
 ```
 
 - 名次和上一則相同 → **不重貼**，只在 Discord 摘要提一句「#N 維持第 K 順位」。
-  WIP 滿的時候，同一批單每個平日都會被重排一次，名次沒變還每天各貼一則，只會
+  WIP 滿的時候，同一批單每一輪都會被重排一次，名次沒變還每輪各貼一則，只會
   把 issue 洗成一串一模一樣的留言。
 
 **依序檢查與放行**：照排序由第 1 順位往下，**每一張都要看完**，依序做：
@@ -912,7 +913,7 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 ## 鐵則
 
 - **放行不等人類點頭，但每次放行前必查三道限制**：`needs-human` 五類、重做
-  次數（≥ 2 升級）、WIP（≥ 2 停止）。三道都通過才放行，沒有任何路徑可以跳過，
+  次數（≥ 2 升級）、WIP（≥ 3 停止）。三道都通過才放行，沒有任何路徑可以跳過，
   查詢失敗一律當作不通過。
 - **GitHub 留痕，不無痕操作**：段 1 的排序理由、段 2 的規格修正、每一次放行、
   每一次升級，都要在對應的 GitHub issue 上貼一則帶 `— By Summer` 簽名的留言，
@@ -957,7 +958,7 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 
 ## 已知限制
 
-- **usercron 已部署**：本 skill 依 Summer 容器內的 usercron 平日排程觸發
+- **usercron 已部署**：本 skill 依 Summer 容器內的 usercron 排程觸發（2026-11-08 起每 2 小時，含週末與夜間；🕘 原本是平日 10:00）
   （`sender_name`＝`SummerTriage`），時程以 `openab-ops` 的 `CRONJOB.md` 為準；
   人類在 Discord 要求時也能手動觸發，WIP 與重做次數每次都現查，手動多跑幾次
   不會繞過上限。

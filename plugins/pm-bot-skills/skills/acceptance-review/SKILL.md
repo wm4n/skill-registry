@@ -840,7 +840,7 @@ Request changes：有就不 merge，R27）：
    `DIRTY`）→ 有衝突，算不通過，要求作者 rebase 到 PR 的 base 分支（`$STATE/base_ref`）最新版。其他
    `mergeStateStatus` 值照實寫進結果。
 5. 每輪最多 merge 一張——本 skill 不 merge，寫「不適用：本 skill 不 merge；
-   merge-poller 每個 repo 每天最多 3 張」。
+   merge-poller 每個 repo 每天有上限（預設 6 張）」。
 
 ### 8. 依結果寫回
 
@@ -879,7 +879,7 @@ cat <<'EOF'
 2. head SHA：測試前後讀到的是同一個 commit
 3. 自跑測試：全部 exit 0（見下方）
 4. 可合併：mergeable=MERGEABLE，mergeStateStatus=<值>
-5. 每輪最多 merge 一張：不適用：本 skill 不 merge；merge-poller 每個 repo 每天最多 3 張
+5. 每輪最多 merge 一張：不適用：本 skill 不 merge；merge-poller 每個 repo 每天有上限（預設 6 張）
 EOF
 # PR 動到測試或測試指令（6b 產生的清單），有才印
 if [ -s "$STATE/sensitive.tsv" ]; then
