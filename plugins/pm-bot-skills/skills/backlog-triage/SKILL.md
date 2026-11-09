@@ -13,6 +13,8 @@ description: >-
   合計達 3（WIP 上限）就停止放行。label 一律先加 ready-for-agent 再移除
   grill-me-done／agent-failed。排序、修規格、放行、升級都在 issue 留言（簽名
   — By Summer），Discord 只放不帶 @ 的摘要（@ 人類由主機端 human-notifier 發）。
+  版本機制啟用的 repo 另有一層：只放行掛在開發中版本（或修正單、baseline-red）上的單，
+  草案上與沒掛版本的單不放行，摘要提議它該進哪一版。
   ready-for-human 歸 product-planning，帶 needs-human 的單一律不動。
 ---
 
@@ -33,10 +35,13 @@ description: >-
 >    自動放行、驗收送回三條路接起來就是一個會一直燒 Rick/Morty 額度的迴圈，
 >    這個上限是那個迴圈的費用防線。
 > 3. **WIP 上限 `WIP_MAX = 3`**：兩個 repo 的 open `agent-active` 加
->    `ready-for-agent`，再加「被驗收送回、正在重做」的 `agent-done`，合計達 3
+>    `ready-for-agent`（版本機制啟用的 repo 只算過得了版本限制的），再加「被驗收送回、正在重做」的 `agent-done`，合計達 3
 >    就停止放行，剩下的留到下一輪（2026-11-08 由 2 改 3，openab-ops Ruling R63：
 >    兩隻 bot 會有一隻同時做兩張；🕘 原本是 2，Rick、Morty 各一張）。同時開太多張會讓兩隻
 >    bot 同時撞用量上限，每張都做不完。
+>
+> 版本機制啟用的 repo 另有一層**版本限制**（見「共用規則」），不算在這三道裡：單沒掛在開發中的版本上，
+> `agent-dev-poller` 不會認領，放行也沒有意義。
 
 ## 觸發與參數
 
@@ -301,9 +306,13 @@ printf '%s\n' "$WORKER_COMMENT"
 
 ### WIP
 
-**WIP ＝ 兩個 repo 的 open issue 裡，帶 `agent-active` 或 `ready-for-agent`
+**WIP ＝ 兩個 repo 的 open issue 裡，帶 `agent-active`、或帶 `ready-for-agent` 而且過得了「版本限制」
 的張數，加上「被驗收送回、正在重做」的 `agent-done` 張數，合計**；帶
-`needs-human` 的不算（它在等人，不佔開發名額）。同一張同時帶兩個 label 只算一次。
+`needs-human` 的不算（它在等人，不佔開發名額）。同一張同時帶兩個 label 只算一次。過不了版本限制的
+`ready-for-agent`（例如人類把它移到下一版草案）`agent-dev-poller` 不會認領、不佔 bot，算進來的話名額會被
+永遠佔住，連修正單都放行不了；下面的 jq 用與版本限制同一張表判斷（`release.py claimable` 的複本）。
+`release-backport` 單由主機端 release-poller 開好就帶 `ready-for-agent`（不經 triage、不受放行限制），
+它過得了版本限制、照樣算進來，所以它們可能讓 WIP 達標而停止放行。
 
 「被驗收送回、正在重做」＝ issue 帶 `agent-done`，而且它的 open PR 在**目前的
 head SHA** 上有 `wman-pm` 的 `CHANGES_REQUESTED` review（Ruling R19，2026-10-17）：
@@ -319,10 +328,37 @@ PR 是方向提案，沒有對應的 issue、也不佔開發 bot。它本來就�
 `closingIssuesReferences` 是空的；下面的 jq 仍明確把它濾掉，不靠「剛好沒有連結」。
 
 ```bash
+# ready-for-agent 的版本限制（同下面「版本限制」那張表）。$ms＝repo 全部 milestone、$iss[0]＝open issue 清單
+cat > /tmp/wip-gate.jq <<'JQ'
+def hdr: (.description // "") | split("\n") | (map(test("^\\s*---\\s*$")) | index(true)) as $s | if $s == null then . else .[:$s] end;
+def field($k): [hdr[] | select(test("^\\s*" + $k + "\\s*[：:]")) | sub("^\\s*" + $k + "\\s*[：:]\\s*"; "") | sub("\\s+$"; "")] | first;
+def z: .title | split(".")[2] | tonumber;
+["草案","開發中","待定版","已定版","送審中","修正中","待上線","已上線"] as $states
+| [$ms[] | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] as $v
+| ([$v[] | select(.state == "open" and z == 0 and field("狀態") == "開發中")] | length) as $dev
+| def pass:
+    [.labels[].name] as $l
+    | if ($v | length) == 0 then true
+      elif ($l | index("baseline-red")) or ($l | index("release-backport")) then true
+      else (.milestone.number // -1) as $n | ([$v[] | select(.number == $n)] | first) as $m
+        | if $m == null or $m.state != "open" then false
+          else ($m | field("狀態")) as $st | ($m | z) as $z
+            | if ($states | index($st)) == null then false
+              elif $z == 0 and $st == "待定版" and (($m | field("分支")) // "") == "" then false
+              elif ["待定版","已定版","送審中","修正中","待上線"] | index($st) then true
+              elif $st == "開發中" then ($z > 0 or $dev <= 1)
+              else false end
+          end
+      end;
+[$iss[0][] | select(all(.labels[]; .name != "needs-human"))
+  | select(any(.labels[]; .name == "agent-active") or (any(.labels[]; .name == "ready-for-agent") and pass))] | length
+JQ
 WIP=0
 for R in wm4n/chainbreak wm4n/hangman; do
-  if N=$(gh issue list --repo "$R" --state open --limit 200 --json number,labels \
-    --jq '[.[] | select(any(.labels[]; .name == "agent-active" or .name == "ready-for-agent") and all(.labels[]; .name != "needs-human"))] | length'); then
+  if gh api "repos/$R/milestones?state=all&per_page=100" --paginate --jq '.[]' > /tmp/wip-ms.jsonl \
+     && gh issue list --repo "$R" --state open --limit 200 --json number,labels,milestone > /tmp/wip-iss.json \
+     && N=$(jq -n --slurpfile ms /tmp/wip-ms.jsonl --slurpfile iss /tmp/wip-iss.json -f /tmp/wip-gate.jq) \
+     && [ -n "$N" ]; then
     WIP=$((WIP + N))
   else
     WIP=FAILED; break
@@ -363,6 +399,62 @@ echo "WIP=$WIP"
 - **查詢失敗（`WIP=FAILED`）→ 當作已滿，本輪不放行**，摘要寫明。
 - **每放行一張就重查一次**，不要用一開始算的數字一路扣：poller 隨時可能在
   兩次放行之間認領或完成別的單。
+
+### 版本限制（三道限制之外的另一層）
+
+2026-11-09 起（設計見 openab-ops `docs/superpowers/specs/2026-11-09-release-management-design.md`）。版本機制啟用的
+repo，主機端 `agent-dev-poller` 只認領 `release.py claimable` 判 `allow` 的單。放行一張它不會認領的單，
+`ready-for-agent` 會一直佔著 WIP 名額、沒人做，所以**放行前要用同一套規則判斷，過不了的單不貼
+`ready-for-agent`**。五類與重做次數的升級照做，不受版本影響；`grill-respond` 也不受版本限制。
+
+**啟用** ＝ 該 repo 有任何標題合法（`v<x>.<y>.<z>`）的 milestone，**open 或 closed、狀態合法與否都算**。
+一個都沒有 → 未啟用，本節不限制（行為同過去）。一旦啟用就 fail-closed：狀態看不懂、上一版關了下一版草案
+還沒開，都不退回全開。
+
+每張單放行前，在同一次 Bash 呼叫裡查（開頭清空變數，不沿用上一張的值）：
+
+```bash
+VER=FAILED; MS_ROWS=; ISSUE_MS=
+if MS_ROWS=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --paginate --jq '.[]
+    | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+    | ((.description // "") | split("\n")
+        | (map(test("^\\s*---\\s*$")) | index(true)) as $sep
+        | (if $sep == null then . else .[:$sep] end)) as $hdr
+    | [.number, .title, .state, ($hdr | map(select(test("^\\s*狀態\\s*[：:]"))) | first // "（沒有狀態行）"),
+       ($hdr | map(select(test("^\\s*分支\\s*[：:]"))) | first // "（沒有分支行）")] | @tsv') \
+  && ISSUE_MS=$(gh issue view "$NUM" --repo "$REPO" --json milestone,labels \
+    --jq '"ms=\(.milestone.number // "none") labels=\([.labels[].name] | join(","))"'); then
+  VER=ok
+fi
+echo "ver=$VER $ISSUE_MS"
+printf '%s\n' "$MS_ROWS"
+```
+
+`MS_ROWS` 每行是 `編號、標題、open/closed、狀態行、分支行`（只讀描述開頭到第一個只有 `---` 的行之間，`---` 之後的自由文字不算）。狀態取狀態行冒號後的字（全形半形冒號都收，去前後空白），
+必須逐字是八個值之一：`草案`、`開發中`、`待定版`、`已定版`、`送審中`、`修正中`、`待上線`、`已上線`。
+`VER=FAILED` → 當作過不了，本輪不放行這張。`MS_ROWS` 空白且 `VER=ok` → 未啟用，過。
+
+啟用的 repo，依序比對，第一條符合的就是結果：
+
+| 這張單 | 結果 |
+| --- | --- |
+| 帶 `baseline-red` | 過（修 main 的紅，不受版本限制） |
+| 掛的 milestone 標題合法，但狀態看不懂（含沒有狀態行） | 不過：版本狀態看不懂 |
+| 掛在 open 的版本上，`z == 0`，狀態 `待定版`，分支行冒號後是空的（含沒有分支行） | 不過：首次定版還沒完成，`release/<x>.<y>` 可能還不存在 |
+| 掛在 open 的版本上，狀態是 `待定版`、`已定版`、`送審中`、`修正中`、`待上線` | 過（修正單，在 release 分支上做） |
+| 掛在 open 的版本上，`z > 0`，狀態 `開發中` | 過（修補版） |
+| 掛在 open 的版本上，`z == 0`，狀態 `開發中` | 過；但這個 repo open 的 `z == 0` 且 `開發中` 的版本有兩個以上時，這類單全都不過：同時有多個開發中的版本 |
+| 其他：沒掛 milestone、掛在 `草案`（含修補版草案）、掛在已 closed 或 `已上線` 的版本、掛的是人類自己的 milestone（標題不是版號） | 不過：沒掛在開發中的版本 |
+
+**過不了的單**：不貼 `ready-for-agent`、不移除 `grill-me-done`／`agent-failed`、不留放行留言；排序、五類、
+重做次數、段 2 的修規格都照做。Discord 摘要為它寫一行：`#N 未放行：<原因>`，加上**提議進哪一版**——
+該 repo 有 `開發中` 的 `z == 0` 版本而且這張跟它的亮點或承諾直接相關 → 提議進那一版；否則有 `草案` 的下一版
+→ 提議進那一版；都沒有 → 「等 `product-planning` 擬下一版草案」。提議只寫在摘要裡，**不掛 milestone**——
+要不要進哪一版是人類的決定，人類在 Discord 說了之後由 `release-manage` 寫。
+
+`release-backport` 單（release-poller 開的「帶回 main」單）：主機端已經貼好 `ready-for-agent`，不在 triage
+放行的範圍，段 1、段 2 一律不碰（它的內文第一行有 release-poller 辨認用的註解，改了會重複開單）；它**算進 WIP**。
+`release-plan`（版本單）與 `release-prep`（打包前人類要做的事）不是開發工作：不排序、不放行、不算 WIP、不列進段 3。
 
 ### 人類處理過的升級（有升級留言、沒有 `needs-human`）
 
@@ -447,7 +539,7 @@ gh issue view "$NUM" --repo "$REPO" --json state,labels,comments
 ```
 
 必須同時成立：`state` 是 `OPEN`；帶著 `SRC`；**沒有** `needs-human`、
-`ready-for-agent`、`agent-active`、`agent-done`。段 2 另外要對這張單**重跑一次**
+`ready-for-agent`、`agent-active`、`agent-done`；**過得了「版本限制」**（現查，milestone 可能在你讀清單之後被改）。段 2 另外要對這張單**重跑一次**
 「重做次數」那整段，確認仍是 `poller_owns=no` 且 `label_state=ok`——人類可能在
 Summer 修規格的這段時間裡回覆了。任一不成立就不放行。
 
@@ -517,6 +609,7 @@ gh issue comment "$NUM" --repo "$REPO" --body "$(cat <<'EOF'
 - needs-human 五類：不落在任何一類（<一句話理由>）
 - 重做次數：<K>（agent-failed <a> 次＋驗收不通過 <b> 次），上限 2
 - WIP：放行前 <W>，上限 3
+- 版本：<v1.19.0 開發中／v1.18.0 已定版（修正單）／baseline-red／版本機制未啟用>
 
 ---
 — By Summer
@@ -543,6 +636,7 @@ comment 只含背景、需求範圍、驗收條件、目標 repo，**不含數�
 **先過濾**，下列單不進排序：
 
 - 帶 `needs-human` → 不動（段 3 列進提醒）。
+- 帶 `release-plan`、`release-prep` 或 `release-backport` → 不是待排序的需求，略過。
 - **放行做到一半**：同時帶 `ready-for-agent` 或 `agent-active` → 上一輪放行時
   移除 `grill-me-done` 失敗。只補做 `gh issue edit "$NUM" --repo "$REPO"
   --remove-label grill-me-done`，不重留言、不佔 WIP、不重新檢查。
@@ -613,7 +707,8 @@ EOF
    換下一張（人類明確放行、而且升級之後沒有新重做事件的單除外，見「人類處理過
    的升級」）；`FAILED` → 跳過，換下一張。`grill-me-done` 的單也可能有過失敗
    紀錄（例如人類把失敗的單送回重新 grill），所以這一步不能省。
-4. **WIP**：已經確定本輪不再放行（前面某張遇到 WIP 滿或查詢失敗）→ 這張不放行，
+4. **版本限制**（見「共用規則」）：過不了 → 不放行、換下一張，摘要寫原因與提議進哪一版。
+5. **WIP**：已經確定本輪不再放行（前面某張遇到 WIP 滿或查詢失敗）→ 這張不放行，
    **繼續看下一張**。否則走「放行程序」（`SRC`＝`grill-me-done`），程序第 2 步
    重查 WIP；滿了（或查詢失敗）就不放行這張，並記下「本輪不再放行」，一樣繼續
    看下一張。
@@ -637,6 +732,7 @@ gh issue list --repo wm4n/hangman    --label agent-failed --state open \
 **1. 先看 label**：
 
 - 帶 `needs-human` → 不動。
+- 帶 `release-backport` → 不動，段 3 列出（原因「帶回 main 的單，不由 triage 修」）。
 - 同時帶 `ready-for-agent` → **放行做到一半**（上一輪移除 `agent-failed` 失敗）。
   只補做 `gh issue edit "$NUM" --repo "$REPO" --remove-label agent-failed`，
   不重留言、不佔 WIP、不重新檢查。
@@ -838,7 +934,8 @@ EOF
 
 - ≥ 2 → 升級第 5 類，不放行。
 - `FAILED` → 跳過，下一輪重算。
-- < 2 → 走「放行程序」（`SRC`＝`agent-failed`；程序第 1 步會重跑「重做次數」
+- < 2 → 先過「版本限制」：過不了就不放行（規格照樣已修好），段 3 列出，下一輪從步驟 5 接著做。
+  過得了 → 走「放行程序」（`SRC`＝`agent-failed`；程序第 1 步會重跑「重做次數」
   那整段，確認人類這段時間沒有回覆）。WIP 已滿就留著，下一輪從步驟 5 接著做。
   poller 重新認領時會優先送回之前做過這張的 bot，這裡不用處理。
 
@@ -878,6 +975,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
    - 「timeline 沒有 `agent-failed` 事件」；
    - 「找不到認領紀錄，無法判斷是否規格問題」；
    - 「WIP 已滿，規格已修，等下一輪放行」；
+   - 「版本限制：<沒掛在開發中的版本／版本狀態看不懂／同時有多個開發中的版本>，規格已修，未放行」；
+   - 「帶回 main 的單（release-backport），不由 triage 修」；
    - 「人類已處理升級但沒有回覆」；
    - 「重做次數或留言查詢失敗」；
    - 「已被認領／放行中，label 過渡中，待確認」（同時帶 `agent-active` 或
@@ -902,8 +1001,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 ## Discord 摘要
 
 整輪合併成**一則**精簡摘要，不逐張各發一則：本輪排序結果、放行了哪幾張、
-修了哪幾張規格、升級了哪幾張、段 3 的兩份清單，以及因 WIP 已滿、label 缺漏、
-查詢或操作失敗而沒做的項目與原因。每項一句話加 issue 連結，完整理由在 issue
+修了哪幾張規格、升級了哪幾張、因版本限制沒放行的單（原因與提議進哪一版）、段 3 的兩份清單，
+以及因 WIP 已滿、label 缺漏、查詢或操作失敗而沒做的項目與原因。每項一句話加 issue 連結，完整理由在 issue
 留言裡，不要把留言全文貼進 Discord。
 
 單則訊息上限 2000 字，超過會被截斷。**摘要不帶任何 @**（2026-10-17 改，R17）：
@@ -915,6 +1014,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 - **放行不等人類點頭，但每次放行前必查三道限制**：`needs-human` 五類、重做
   次數（≥ 2 升級）、WIP（≥ 3 停止）。三道都通過才放行，沒有任何路徑可以跳過，
   查詢失敗一律當作不通過。
+- **版本機制啟用的 repo，只放行過得了「版本限制」的單**；查詢失敗、狀態看不懂都當作過不了。
+  過不了的單不貼 `ready-for-agent`，提議進哪一版只寫在摘要，不掛 milestone。
 - **GitHub 留痕，不無痕操作**：段 1 的排序理由、段 2 的規格修正、每一次放行、
   每一次升級，都要在對應的 GitHub issue 上貼一則帶 `— By Summer` 簽名的留言，
   記錄處理過程、決策依據與數據來源——這是 persona `Summer-AGENTS_v2.md`
@@ -952,6 +1053,7 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 - **不建 worktree、不切分支、不改程式碼**——只讀 issue、留言與 timeline，
   改 Summer 自己開的 issue 的描述文字、在人類開的 issue body 末尾附加修正段，
   貼 issue 留言與 Discord 訊息，以及放行與升級的 label 操作。
+- **不把單掛上或移出 milestone、不寫 milestone 的狀態**：版本範圍只有人類能同意，寫入歸 `release-manage`。
 - **不碰 `agent-active` 的單**：開發中的單、卡單的重送與升級都是 poller 的事。
 - **掃全部時不碰 `ready-for-human` 的單**：那是 `product-planning` 的範圍（段 4）。
 - **不用 `gh label create` 建 label**。
@@ -965,6 +1067,8 @@ gh issue list --repo wm4n/hangman    --label needs-human --state open \
 - **persona 需同步**：`Summer-AGENTS_v2.md` 若仍寫「絕不自行貼
   `ready-for-agent`」，那是改寫前的舊規定；`needs-human` 五類的定義仍以 persona
   為準。
+- **「版本限制」是 openab-ops `release.py claimable` 的複本**：判斷規則兩邊要一致，主機端改了認領規則，
+  這裡的表要跟著改，否則放行的單會沒人認領、佔著 WIP。
 - **`needs-human` label 需先存在於兩個 repo**：本 skill 不建 label，缺的話
   label 預檢會擋下該 repo 的段 1、段 2，並在摘要請人類建立。
 - **放行時移除 `agent-failed` 失敗**：poller 每 10 分鐘認領一次，所以單子

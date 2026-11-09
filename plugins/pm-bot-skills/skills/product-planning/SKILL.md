@@ -17,7 +17,9 @@ description: >-
   規則；人類 approve 後由 direction-proposal skill 開 issue。收養貼 grill-me、
   spec-only、pm-owned；ready-for-human 的單若落在 needs-human 五類就改貼
   needs-human 並留言說明（@ 人類由主機端 human-notifier 發，本 skill 不 @），
-  不落在五類由 Summer 決定後收養。數據拿不到就明說，不推測冒充依據。
+  不落在五類由 Summer 決定後收養。另外檢查各 repo 的版本（GitHub
+  milestone）：沒有開發中或草案中的下一版就用 release-manage 擬版本草案；週一再檢查已有的版本
+  亮點與範圍是否仍成立，要增刪只提議、等人類同意。數據拿不到就明說，不推測冒充依據。
 ---
 
 # Product Planning
@@ -30,6 +32,9 @@ description: >-
 >   `direction-proposal` skill（`materialize` 模式）開 issue。issue 該帶的標記
 >   （下面三項）由那支 skill 負責。
 > - **人類開的 issue → 收養**（5b）：人類開的單視為方向已確認，不走提案。
+>
+> 版本是另一層（5c）：提案通過、收養都只代表「值得做」，單要進哪一版由版本草案決定，人類同意草案後
+> 才會被 Rick／Morty 認領。
 >
 > 收養的（以及 `direction-proposal` 開的）每張 issue 要帶齊下列標記，各自餵給
 > 不同的下游消費者，缺一不可：
@@ -138,6 +143,9 @@ gh pr list --repo wm4n/hangman    --state merged --limit 20 --json number,title,
 
 `comments` 要一次撈齊：下面候選的留言檢查與「人類處理完之後」判斷都要看
 留言，全部用這份資料，不再逐張另外查。
+
+版本機制的內部單不是需求：帶 `release-plan`（版本單）、`release-prep`（打包前檢查）、`release-backport`
+（帶回 main）的 issue 一律不當候選、不拿來比對主題、不留言、不計入預算。
 
 開放 issue 用來**避免重複提案**：新想法先跟這份清單比對主題，明顯重疊的
 不提，改成在既有 issue 底下留言補充佐證（既有 issue 若帶 `needs-human`
@@ -310,7 +318,7 @@ label。）Summer 的升級留言之後沒有 `wm4n` 的留言，一律跳過、
 先套用上面的「候選的留言檢查」（含 opt-out）。步驟 2 的 open issue 裡，挑出
 **沒有任何流程 label** 的：不含 `grill-me`、`grill-me-*`（含 `grill-me-done`）、
 `ready-for-agent`、`ready-for-human`、`agent-*`（`agent-active`／`agent-failed`／
-`agent-done`…）、`needs-human`、`pm-owned`。這些就是人類開了、但還沒有任何 bot
+`agent-done`…）、`needs-human`、`pm-owned`、`release-plan`／`release-prep`／`release-backport`。這些就是人類開了、但還沒有任何 bot
 接手的單。含 `ready-for-human` 的歸 3c，已有 `pm-owned` 的是已收養過，都不重複
 處理。
 
@@ -332,8 +340,8 @@ gh issue list --repo wm4n/hangman    --label ready-for-human --state open \
 
 先套用上面的「候選的留言檢查」（含 opt-out）。這是人類標記「要人來決定」而一直
 沒人處理的單。**先過濾**，下列任一成立就跳過、不動：同時帶 `needs-human`、
-`grill-me*`（含 `grill-me-done`）、`agent-*`、`ready-for-agent`、`pm-owned`
-（代表另有流程或人類已接手，貼標記會與之衝突）；或作者是 bot 帳號
+`grill-me*`（含 `grill-me-done`）、`agent-*`、`ready-for-agent`、`pm-owned`、
+`release-plan`／`release-prep`／`release-backport`（代表另有流程或人類已接手，貼標記會與之衝突）；或作者是 bot 帳號
 （`wman-dev`、`wman-review`、`wman-pm`）。通過的才逐張讀完 body 與 comments，
 判斷**卡住的那個決定**落不落在 `needs-human` 五類：
 
@@ -391,8 +399,10 @@ for REPO in wm4n/chainbreak wm4n/hangman; do
     --jq "[.[] | select(((.headRefName // \"\") | startswith(\"proposal/\")) and .createdAt >= \"$SINCE\")] | length"
   # Summer 近 7 天直接開的單（2026-10-23 以前的 5a）。body 含 docs/proposals/ 的是提案落地開的，
   # 已在開提案時算過，排除
-  gh issue list --repo "$REPO" --author wman-pm --state all --limit 200 --json createdAt,body \
-    --jq "[.[] | select(.createdAt >= \"$SINCE\" and ((.body // \"\") | contains(\"docs/proposals/\") | not))] | length"
+  # 版本單（release-plan）、打包前檢查（release-prep）、帶回 main（release-backport）都可能是 wman-pm 開的，
+  # 但不是新需求，排除。release-manage 為退件／上線後問題開的修正單沒有專屬 label，仍會計入（接受）
+  gh issue list --repo "$REPO" --author wman-pm --state all --limit 200 --json createdAt,body,labels \
+    --jq "[.[] | select(.createdAt >= \"$SINCE\" and ((.body // \"\") | contains(\"docs/proposals/\") | not) and all(.labels[]; (.name != \"release-plan\" and .name != \"release-prep\" and .name != \"release-backport\")))] | length"
   # Summer 近 7 天的收養（以「## Summer 收養此單」留言為準）
   gh issue list --repo "$REPO" --state all --limit 200 --json comments \
     --jq "[.[] | select(any(.comments[]; .author.login == \"wman-pm\" and (.body | startswith(\"## Summer 收養此單\")) and .createdAt >= \"$SINCE\"))] | length"
@@ -693,9 +703,58 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
 不能被自動化悄悄加回來。label 預檢已經擋掉了「label 不存在」這個最常見的
 失敗原因，這條只處理預檢之後的偶發失敗。
 
+### 5c. 版本草案（每個 repo 各自，不計入預算）
+
+2026-11-09 起（設計見 openab-ops `docs/superpowers/specs/2026-11-09-release-management-design.md`）。
+版本是 GitHub milestone（標題 `v<x>.<y>.<z>`），**範圍只有人類能同意**。擬草案、增刪提議、人類同意後的
+寫入都是 **`release-manage` skill** 的事：這裡只決定「這一輪要不要動」，要動就載入 `release-manage`
+照它的「擬草案」「增刪」做，不在這裡重寫步驟。本節不受預算限制，預算用完、本輪沒有任何提案也照跑。
+
+前提：該 repo 有 `release-plan`、`release-prep` 兩個 label（看步驟 2「label 預檢」同一份 `gh label list` 輸出；缺就不動這個
+repo 的版本，摘要請人類建立，不自己建）。
+
+先讀這個 repo 的版本現況（輸出：編號、標題、open/closed、狀態行）：
+
+```bash
+gh api "repos/$REPO/milestones?state=all&per_page=100" --paginate --jq '.[]
+  | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
+  | [.number, .title, .state, ((.description // "") | split("\n")
+      | (map(test("^\\s*---\\s*$")) | index(true)) as $sep
+      | (if $sep == null then . else .[:$sep] end)
+      | map(select(test("^\\s*狀態\\s*[：:]"))) | first // "（沒有狀態行）")] | @tsv'
+```
+
+狀態取狀態區（描述開頭到第一個只有 `---` 的行）裡 `狀態` 那行冒號後的字（全形半形冒號都收，去前後空白）。
+**下一版** ＝ open、`z == 0`、狀態是 `草案` 或 `開發中` 的版本。修補版（`z > 0`）不算下一版，歸
+`release-manage` 的「上線後發現的問題」。
+
+先處理一種例外：有狀態不是八個合法值（`草案`、`開發中`、`待定版`、`已定版`、`送審中`、`修正中`、`待上線`、
+`已上線`）的版本 → 這個 repo 本輪不擬新草案、不提議增刪，摘要提一句（主機端已通知人類）。
+
+接著兩件事，各有自己的條件：
+
+- **擬草案**（每一輪都判斷）：沒有 open 的 `z == 0` 草案，而且沒有 open 的 `z == 0` 開發中版本、或那個
+  開發中版本已經可以定版（承諾單全部完成：`release-manage`「定版」第 2 步的查詢沒有結果，而且至少有一張
+  已關閉的承諾單）→ 照 `release-manage` 的「擬草案」做（版號、亮點、範圍都在那裡定）。可以定版時就備好
+  下一版，是因為定版之後一般單會停工。亮點湊不出來時，`release-manage` 會要求走 5a 提案 PR 提亮點候選，
+  那份提案照 5a 算預算。
+- **檢查草案與開發中版本**（只在台北時間週一，或人類在 Discord 要求規劃時做；`TZ=Asia/Taipei date +%u`
+  印 `1` 是週一；其他輪不做，避免每隔幾小時重複提議）：對每個 open 的 `z == 0` 草案或開發中版本，不重擬：
+  1. 亮點還成立嗎：讀版本單（milestone 描述的 `版本單` 鍵指到的 issue）的 `## 亮點`，對應的單是否還在
+     版本裡、有沒有被 `needs-human` 或 `agent-failed` 卡住、跟人類最近的留言有沒有矛盾。
+  2. 範圍還成立嗎：承諾的單有沒有被人類關成不做；backlog 有沒有新的、玩家看得見的單值得進這一版。
+  3. 結果：都成立 → 不動，摘要寫一行「`v…` 範圍仍成立」。要改而版本是 `草案` → 直接改版本單內文
+     （`release-manage` 的「草案期間的增刪」）。要改而版本是 `開發中` → **只提議**：在版本單留言
+     `## Summer 提議：增刪`（格式見 `release-manage`），等人類表態；已經留過同樣的提議、人類還沒回，
+     就不重留。
+
+提議不等於排入：本節**不**把單掛上或移出 milestone、**不**寫 milestone 的 `狀態`（`草案` → `開發中` 是人類
+說「同意」之後 `release-manage` 的事）。
+
 ### 6. Discord 貼精簡摘要
 
-只貼：新開的提案 PR（標題與連結）、收養的 issue、`needs-human` 升級的 issue、各一句話理由與
+只貼：新開的提案 PR（標題與連結）、收養的 issue、`needs-human` 升級的 issue、各 repo 的版本草案
+（新擬的連結與亮點，或「範圍仍成立」「提議增刪」一行）、各一句話理由與
 連結，不要把完整 body 貼進 Discord——單則訊息有 2000 字限制，超過會被截斷，
 而截斷後的訊息內容不完整還可能被其他 poller 誤判成新事件、重複觸發。
 **摘要不帶任何 @**（2026-10-17 改，R17）：`needs-human` 的通知由主機端
@@ -734,6 +793,8 @@ label 承擔，收養的紀錄由動作 1 的留言承擔。
   `pm-owned`／`needs-human` 任一個，那個 repo 本輪就不做這些動作。
 - **續做做到一半的收養不受預算與排序限制**，一定會跑。
 - **不在 Discord @ 任何人**：通知人類是主機端 `human-notifier.sh` 的事（R17）。
+- **版本範圍只有人類能同意**：5c 只擬草案與提議，不把單掛上或移出 milestone、不寫 milestone 的
+  `狀態`；這些都經 `release-manage`、依人類在 Discord 的原話才寫。
 - **清單以外的決定 Summer 自己做**，並把理由留在 issue 留言（帶
   `— By Summer`）——決定沒有留下理由，事後沒有人看得出為什麼這樣收養。
 - 簽名開頭是 **em dash（U+2014）**「—」，不是連字號「-」。兩者肉眼幾乎

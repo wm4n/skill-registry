@@ -24,6 +24,7 @@ claude plugins marketplace add wm4n/skill-registry
 | `self-evolution` | Agent self-improvement loop: learns from user corrections (root-cause → prevention rule), retrospects on detours, proposes new skills when it notices repeated work, and detects habit/inertia — persisting lessons to `~/.claude/evolution/` and a capped block in the global `~/.claude/CLAUDE.md`. |
 | `mac-disk-cleanup-scan` | macOS 磁碟空間分析（`mac-disk-cleanup` plugin）：唯讀掃描快取、日誌、暫存、垃圾桶、大檔/舊檔、node_modules、npm/pip/gradle/cargo 快取、Docker、Xcode DerivedData/Archives、iOS 備份、Time Machine 本機快照，產生分類 + 大小排序 + 風險徽章 + 可複製清理指令的報告。只掃描、只回報，絕不刪除。 |
 | `team-onboarding` | Onboard the bot to a team like a new hire: ingest onboarding material (local folder, pasted text, links, or interactive interview), tier it by severity, and distill it into a global cross-repo profile under `~/.claude/team-profile/` plus an always-on self-check block in `~/.claude/CLAUDE.md`. MUST-NOT rules stay always-on; details are recalled on demand. Never writes before confirmation. |
+| `release-manage` | 版本統籌（`pm-bot-skills` plugin，Summer 專用）：擬版本草案（亮點、承諾的單與理由），並把人類在 Discord 對某個版本的決定（同意、增刪、定版、送審了、退件、通過）寫回 GitHub milestone 的狀態區與版本單。範圍只有人類能同意；分支、版號、tag、Release 由主機端 release-poller 做，這個 skill 不碰。 |
 
 ## Usage
 
