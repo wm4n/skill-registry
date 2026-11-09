@@ -399,9 +399,10 @@ for REPO in wm4n/chainbreak wm4n/hangman; do
     --jq "[.[] | select(((.headRefName // \"\") | startswith(\"proposal/\")) and .createdAt >= \"$SINCE\")] | length"
   # Summer 近 7 天直接開的單（2026-10-23 以前的 5a）。body 含 docs/proposals/ 的是提案落地開的，
   # 已在開提案時算過，排除
-  # 版本單（release-plan）也是 wman-pm 開的，但不是新需求，排除
+  # 版本單（release-plan）、打包前檢查（release-prep）、帶回 main（release-backport）都可能是 wman-pm 開的，
+  # 但不是新需求，排除。release-manage 為退件／上線後問題開的修正單沒有專屬 label，仍會計入（接受）
   gh issue list --repo "$REPO" --author wman-pm --state all --limit 200 --json createdAt,body,labels \
-    --jq "[.[] | select(.createdAt >= \"$SINCE\" and ((.body // \"\") | contains(\"docs/proposals/\") | not) and all(.labels[]; .name != \"release-plan\"))] | length"
+    --jq "[.[] | select(.createdAt >= \"$SINCE\" and ((.body // \"\") | contains(\"docs/proposals/\") | not) and all(.labels[]; (.name != \"release-plan\" and .name != \"release-prep\" and .name != \"release-backport\")))] | length"
   # Summer 近 7 天的收養（以「## Summer 收養此單」留言為準）
   gh issue list --repo "$REPO" --state all --limit 200 --json comments \
     --jq "[.[] | select(any(.comments[]; .author.login == \"wman-pm\" and (.body | startswith(\"## Summer 收養此單\")) and .createdAt >= \"$SINCE\"))] | length"
