@@ -206,9 +206,9 @@ LIB
    - 讀 `open_committed`。**沒有任何一張** 而且 `closed_committed` ≥ 1 → 可以定版。
    - 還有開著的單，**每一張**都屬於下面「可以移出」的情況 → 先照「範圍調整」把它們移到下一版（下一版還不存在就先
      照「擬版本」開一份 `草案`），再判斷一次。只要有一張不屬於，就不定版，摘要寫「`v…` 還差：#…」。
-     **可以移出**：(a) 帶 `needs-human` 或 `ready-for-human`、最後更新超過 3 天；或 (b) 帶 `agent-failed` 而且重做次數已達上限
-     （`backlog-triage`「重做次數」≥ 2）；而且 (c) 不是亮點的單（版本單 `## 亮點` 段點名的單不移，卡住就等，摘要講）；
-     (d) 不是 `agent-active`、沒有開著的 PR（`gh pr list --repo "$REPO" --search "#$N in:body" --state open`）。
+     **可以移出**：(a) 帶 `needs-human` 或 `ready-for-human`、最後更新超過 3 天（重做達上限的單 triage 會貼
+     `needs-human`，也落在這條）；而且 (b) 不是亮點的單（版本單 `## 亮點` 段點名的單不移，卡住就等，摘要講）；
+     (c) 不是 `agent-active`、沒有開著的 PR（`gh pr list --repo "$REPO" --search "#$N in:body" --state open`）。
    - 可以定版，再過守門（另一個版本在送審流程中、人類說過先不要定版 → 不定版，摘要講原因）。過了就照「定版」做。
 3. **開始開發**：沒有 open 的 `z == 0` `開發中` 版本，也沒有「首次定版還沒切好分支」的版本（守門第一條）時，
    取 open、`z == 0`、`草案` 裡版號最小的一個，照「開始開發」做。
