@@ -388,6 +388,8 @@ VER=FAILED; MS_ROWS=; ISSUE_MS=
 if MS_ROWS=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --paginate --jq '.[]
     | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
     | [.number, .title, .state, ((.description // "") | split("\n")
+        | (map(test("^\\s*---\\s*$")) | index(true)) as $sep
+        | (if $sep == null then . else .[:$sep] end)
         | map(select(test("^\\s*狀態\\s*[：:]"))) | first // "（沒有狀態行）")] | @tsv') \
   && ISSUE_MS=$(gh issue view "$NUM" --repo "$REPO" --json milestone,labels \
     --jq '"ms=\(.milestone.number // "none") labels=\([.labels[].name] | join(","))"'); then
@@ -397,7 +399,7 @@ echo "ver=$VER $ISSUE_MS"
 printf '%s\n' "$MS_ROWS"
 ```
 
-`MS_ROWS` 每行是 `編號、標題、open/closed、狀態行`。狀態取狀態行冒號後的字（全形半形冒號都收，去前後空白），
+`MS_ROWS` 每行是 `編號、標題、open/closed、狀態行`（只讀描述開頭到第一個只有 `---` 的行之間，`---` 之後的自由文字不算）。狀態取狀態行冒號後的字（全形半形冒號都收，去前後空白），
 必須逐字是八個值之一：`草案`、`開發中`、`待定版`、`已定版`、`送審中`、`修正中`、`待上線`、`已上線`。
 `VER=FAILED` → 當作過不了，本輪不放行這張。`MS_ROWS` 空白且 `VER=ok` → 未啟用，過。
 
