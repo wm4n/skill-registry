@@ -6,8 +6,8 @@ description: >-
   的 usercron 週五 17:00 觸發（訊息「執行 product-status-report
   skill」，sender_name＝SummerReport；cronjob.toml 尚未寫入，見「已知
   限制」），或人類在 Discord 提出同類請求（如「這週進度如何」「整理一份
-  週報」「上次回報之後有什麼進展」）時觸發：兩個 GA4 property 的關鍵
-  指標（分開報告，不平均、不加總）、backlog 各 label 的張數、本期
+  週報」「上次回報之後有什麼進展」）時觸發：每個 repo 的版本進度（放最前面）、
+  兩個 GA4 property 的關鍵指標（分開報告，不平均、不加總）、backlog 各 label 的張數、本期
   merged PR、卡單與 agent-failed 清單、下期建議，全部濃縮進**一則**
   Discord 訊息。訊息長度是硬性上限 2000 字元（超過會被截斷並導致重複
   觸發，這是本 skill 唯一會不斷撞到的坑）。數據拿不到就明說查無資料，
@@ -51,7 +51,46 @@ echo "回報區間：$CUTOFF_DATE 至今"
 是 Linux，開發機常是 macOS，兩邊 `date -d`／`date -v` 語法不同，
 `node` 內建的 `Date` 沒有這個落差）。
 
-### 2. GA4 關鍵指標——兩個 property 分開查，不准平均
+### 2. 各 repo 版本進度——週報最前面一段
+
+版本是 GitHub milestone（標題 `v<x>.<y>.<z>`，狀態寫在描述開頭的狀態區）。每個 repo 各自讀：
+
+```bash
+for R in wm4n/chainbreak wm4n/hangman; do
+  echo "== $R"
+  gh api "repos/$R/milestones?state=all&per_page=100" --paginate \
+    --jq '.[] | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | {number, title, state, description} | tojson'
+done
+```
+
+只看 `state` 是 `open` 的 milestone，狀態取描述裡 `狀態：` 那行（冒號全形半形都收，去前後空白）。每個版本寫**一行**，
+格式逐字如下（與主機端 `human-notifier` 的版本進度同一套規則）。`<版>` ＝ `v1.2.0「<亮點>」`；沒有 `亮點`
+鍵就寫 `v1.2.1 `（版號後接一個空格）。版本上的單用
+`gh issue list --repo "$R" --milestone "<標題>" --state all --limit 200 --json number,state,labels` 取，
+**承諾單 ＝ 不含 `release-plan`、`release-backport` 的單**（`release-prep` 算承諾單）：
+
+| 狀態 | 這一行寫 |
+| --- | --- |
+| `草案` | `<版>草案待你同意（版本單 #N）`（`版本單` 鍵沒有就省略括號） |
+| `開發中` | `<版>開發中：承諾 N 項、完成 M 項`；有 open 的 `needs-human`／`ready-for-human`／`release-prep` 單就加 `；等你做：#a #b`；有 open 的 `agent-failed` 單（扣掉前一句已列的）就加 `；卡住：#c（agent-failed）` |
+| `待定版` | `v1.2.0 待定版，等 release-poller 打包` |
+| `已定版` | `v1.2.0 已定版`；`送審點` 鍵有值就接 `，可以打包 <送審點>`，`build` 鍵也有值再接 `（build N）` |
+| `送審中`、`修正中`、`待上線` | `v1.2.0 <狀態>第 N 天`（N ＝ 台北今天減 `送審日`，用 `node -e` 算；`送審日` 缺或格式不對就省略「第 N 天」）；版本上 open 的 `release-backport` 單有的話加 `；還沒帶回 main：#a #b` |
+
+其餘情況：
+
+- `state` 是 `closed`、或狀態是 `已上線` → 不列（已經結束）。
+- 沒有 `狀態` 行、或值不是這八個之一（`草案`、`開發中`、`待定版`、`已定版`、`送審中`、`修正中`、`待上線`、`已上線`）→ 列
+  `⚠️ <標題> 狀態看不懂（<狀態行原文，沒有就寫「沒有狀態行」>）`，如實呈現，不替它猜一個狀態。
+- 這個 repo 有版本 milestone、但沒有任何一個 open 的 `z == 0` 版本是 `開發中` → 多列一行
+  `沒有開發中的版本，一般單暫停認領`（修正單與 baseline-red 不受影響）。
+- 標題不是 `v<x>.<y>.<z>` 的 milestone 是人類自己的，不列。
+- 一個版本 milestone 都沒有 → 該 repo 寫 `尚無版本`。
+- 查詢失敗 → 該 repo 寫「版本進度：查無資料」，規則同 GA4 查無資料，不推測。
+
+兩個產品各列各的版本，不合併。
+
+### 3. GA4 關鍵指標——兩個 property 分開查，不准平均
 
 ```bash
 node /etc/openab/ga4/ga4-report.js --property "$GA4_PROPERTY_CHAINBREAK" --days "$SINCE_DAYS" --preset overview
@@ -70,7 +109,7 @@ preset——回報要精簡，查詢也不必比需要的多。
 推測冒充**——猜一個聽起來合理的數字，比誠實承認「這段沒查到」更糟，
 會讓看報告的人依據假數據做下一步判斷。
 
-### 3. Backlog 各 label 張數
+### 4. Backlog 各 label 張數
 
 ```bash
 gh issue list --repo wm4n/chainbreak --state open --json number,labels --limit 200
@@ -88,7 +127,7 @@ gh issue list --repo wm4n/hangman    --state open --json number,labels --limit 2
 回頭對照縮寫表——這則訊息的重點是掃一眼就懂，寫全名不需要額外對照，
 模板見下方「Discord 訊息模板」。
 
-### 4. 本期 merged PR
+### 5. 本期 merged PR
 
 ```bash
 for R in wm4n/chainbreak wm4n/hangman; do
@@ -106,7 +145,7 @@ done
 剛好 30 筆全部落在區間內，代表這期間量異常大，在回報裡註明「merged 數量
 達查詢上限 30，實際可能更多」，不要默默漏算。
 
-### 5. 卡單與 `agent-failed` 清單
+### 6. 卡單與 `agent-failed` 清單
 
 ```bash
 gh issue list --repo wm4n/chainbreak --label agent-failed --state open --json number,title,url
@@ -120,18 +159,19 @@ gh issue list --repo wm4n/hangman    --label agent-active --state open --json nu
 `updatedAt` 距現在超過 24 小時列為**疑似卡單**（措辭同樣要留查證空間，
 不寫成「已確認卡住」，理由同 `backlog-triage`）。
 
-### 6. 下期建議
+### 7. 下期建議
 
-依步驟 2–5 蒐集到的訊號，寫 1–2 句具體建議（例如「hangman 留存率連續
+依步驟 2–6 蒐集到的訊號，寫 1–2 句具體建議（例如「hangman 留存率連續
 兩週下滑，建議優先排 #23」「chainbreak 目前 3 張 agent-failed 卡著，
 建議先清規格債」）。**查不到明確訊號就直接說「本期無明顯異常訊號」**，
 不要為了填滿這一段硬湊一個聽起來像洞見但沒有數據支撐的建議。
 
-### 7. 組訊息、檢查字數、送出
+### 8. 組訊息、檢查字數、送出
 
 依下方「Discord 訊息模板」組出**一則**訊息，送出前確認總字元數（含
 emoji、換行、markdown 符號）在 2000 字元以內。逼近或超過上限時，按
-下面順序砍到符合為止，**不要整段從頭改寫**：
+下面順序砍到符合為止，**不要整段從頭改寫**。「版本進度」那一段最後才動（它是這則訊息的開頭，
+也是人類最先要看的）：
 
 1. 先砍「下期建議」的細節，只留一句話結論。
 2. merged PR 只列數量與代表性的 2–3 個編號，其餘寫「其餘 N 個略」；
@@ -140,11 +180,17 @@ emoji、換行、markdown 符號）在 2000 字元以內。逼近或超過上限
    詳見 GitHub 對應 label」。
 4. 仍然超過 → GA4 指標只留最關鍵的 1 個數字，其餘訊號留到下次或另外
    在 Discord 追問時展開。
+5. 還是超過 → 版本進度每行只留版本與狀態（去掉亮點、`等你做`／`卡住`的編號清單，
+   只留張數）。
 
 ## Discord 訊息模板
 
 ```
 📊 產品週報｜<CUTOFF_DATE> 至今
+
+**版本進度**
+chainbreak：v1.0.0「<亮點>」開發中：承諾 6 項、完成 4 項；等你做：#74；卡住：#83（agent-failed）
+hangman：v1.18.0 送審中第 5 天；還沒帶回 main：#91
 
 **Chainbreak**
 GA4：<核心指標 1–2 個，例如「活躍使用者 -12%、結算完成率 68%」>
@@ -170,7 +216,7 @@ Merged：1 個（#19）
 訊息裡一邊寫全名一邊寫簡稱**——七個數字本身不長，全名換不到多少字數，
 換到的是不用回頭對照縮寫表就能看懂。
 
-**這個模板的骨架本身約 500 字元，寫全名比縮寫多用一點空間，但仍遠低於
+**這個模板的骨架本身約 650 字元，寫全名比縮寫多用一點空間，但仍遠低於
 2000 字元上限**；套用真實資料後很容易再膨脹——GA4 指標描述變長、
 merged PR 或卡單張數變多，每一項都在往上加，範例看起來精簡不代表套用
 真實資料後一定在限額內。這正是「送出前一定要實測字元數」這條規則存在
@@ -197,7 +243,8 @@ merged PR 或卡單張數變多，每一項都在往上加，範例看起來精�
   彙整既有數據發報告，不對 backlog 或 PR 做任何動作，那些是
   `product-planning`／`backlog-triage`／`acceptance-review` 的職責。
 - **不 clone repo、不建 worktree**——只讀 GA4 報表與 `gh issue`／
-  `gh pr` 的列表資訊。
+  `gh pr`／milestone 的列表資訊。版本的狀態是 `release-manage` 與
+  `release-poller` 寫的，這裡只報告，不改。
 - **不把兩個產品的數字合併成單一總表**——即使只是並排列出方便閱讀，
   每個數字也必須看得出來屬於哪個產品。
 - **不為了填滿模板硬湊訊號或建議**——查無資料、查無異常訊號，就照實
@@ -214,6 +261,8 @@ merged PR 或卡單張數變多，每一項都在往上加，範例看起來精�
   期間內 merged 數量正常情況遠低於 30，超過時回報裡會註明「達查詢
   上限」，但不會自動翻頁抓完整清單。2026-10-23 起提案 PR 也會被
   merge，與程式 PR 共用這 30 筆，量大時比以前更早撞到上限。
+- **版本進度的格式是 openab-ops `release.py progress` 的複本**：主機端 `human-notifier` 的每晚摘要用同一套規則，
+  那邊改了行文或欄位，這裡的表要跟著改，兩份摘要才不會講法不同。
 - **`agent-active` 逾時只是訊號，不是已核實的事實**：跟
   `backlog-triage` 段 3 相同的限制——Summer 看不到 Mac mini／k3s 上
   實際的 pod 狀態，`updatedAt` 逾時多數情況代表卡住，但也可能只是
