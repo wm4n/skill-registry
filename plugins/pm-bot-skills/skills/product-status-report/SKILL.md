@@ -72,7 +72,7 @@ done
 | 狀態 | 這一行寫 |
 | --- | --- |
 | `草案` | `<版>草案待你同意（版本單 #N）`（`版本單` 鍵沒有就省略括號） |
-| `開發中` | `<版>開發中：承諾 N 項、完成 M 項`；有 open 的 `needs-human`／`ready-for-human`／`release-prep` 單就加 `；等你做：#a #b`；有 open 的 `agent-failed` 單（扣掉前一句已列的）就加 `；卡住：#c（agent-failed）` |
+| `開發中` | `<版>開發中：承諾 N 項、完成 M 項`；有 open 的 `needs-human`／`ready-for-human`／`release-prep` 單就加 `；等你做：#a #b`；有 open 的 `agent-failed` 單（扣掉前一句已列的）就加 `；卡住：#c（agent-failed）`；不含 `release-prep` 的承諾單至少一張而且全部已關閉（可以定版，等你說「定版」）就在最後加 `；可以定版` |
 | `待定版` | `v1.2.0 待定版，等 release-poller 打包` |
 | `已定版` | `v1.2.0 已定版`；`送審點` 鍵有值就接 `，可以打包 <送審點>`，`build` 鍵也有值再接 `（build N）` |
 | `送審中`、`修正中`、`待上線` | `v1.2.0 <狀態>第 N 天`（N ＝ 台北今天減 `送審日`，用 `node -e` 算；`送審日` 缺或格式不對就省略「第 N 天」）；版本上 open 的 `release-backport` 單有的話加 `；還沒帶回 main：#a #b` |
