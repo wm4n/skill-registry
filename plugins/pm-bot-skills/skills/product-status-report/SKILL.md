@@ -63,7 +63,7 @@ for R in wm4n/chainbreak wm4n/hangman; do
 done
 ```
 
-只看 `state` 是 `open` 的 milestone，狀態取描述裡 `狀態：` 那行（冒號全形半形都收，去前後空白）。每個版本寫**一行**，
+只看 `state` 是 `open` 的 milestone，狀態取狀態區（描述開頭到第一個只有 `---` 的行）裡 `狀態` 那行（冒號全形半形都收，去前後空白）。每個版本寫**一行**，
 格式逐字如下（與主機端 `human-notifier` 的版本進度同一套規則）。`<版>` ＝ `v1.2.0「<亮點>」`；沒有 `亮點`
 鍵就寫 `v1.2.1 `（版號後接一個空格）。版本上的單用
 `gh issue list --repo "$R" --milestone "<標題>" --state all --limit 200 --json number,state,labels` 取，
