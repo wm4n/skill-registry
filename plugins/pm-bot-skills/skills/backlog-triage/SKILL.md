@@ -35,7 +35,7 @@ description: >-
 >    自動放行、驗收送回三條路接起來就是一個會一直燒 Rick/Morty 額度的迴圈，
 >    這個上限是那個迴圈的費用防線。
 > 3. **WIP 上限 `WIP_MAX = 3`**：兩個 repo 的 open `agent-active` 加
->    `ready-for-agent`，再加「被驗收送回、正在重做」的 `agent-done`，合計達 3
+>    `ready-for-agent`（版本機制啟用的 repo 只算過得了版本限制的），再加「被驗收送回、正在重做」的 `agent-done`，合計達 3
 >    就停止放行，剩下的留到下一輪（2026-11-08 由 2 改 3，openab-ops Ruling R63：
 >    兩隻 bot 會有一隻同時做兩張；🕘 原本是 2，Rick、Morty 各一張）。同時開太多張會讓兩隻
 >    bot 同時撞用量上限，每張都做不完。
@@ -306,10 +306,13 @@ printf '%s\n' "$WORKER_COMMENT"
 
 ### WIP
 
-**WIP ＝ 兩個 repo 的 open issue 裡，帶 `agent-active` 或 `ready-for-agent`
+**WIP ＝ 兩個 repo 的 open issue 裡，帶 `agent-active`、或帶 `ready-for-agent` 而且過得了「版本限制」
 的張數，加上「被驗收送回、正在重做」的 `agent-done` 張數，合計**；帶
-`needs-human` 的不算（它在等人，不佔開發名額）。同一張同時帶兩個 label 只算一次。`release-backport` 單由主機端 release-poller 開好就帶
-`ready-for-agent`（不經 triage、不受放行限制），照樣算進來，所以它們可能讓 WIP 達標而停止放行。
+`needs-human` 的不算（它在等人，不佔開發名額）。同一張同時帶兩個 label 只算一次。過不了版本限制的
+`ready-for-agent`（例如人類把它移到下一版草案）`agent-dev-poller` 不會認領、不佔 bot，算進來的話名額會被
+永遠佔住，連修正單都放行不了；下面的 jq 用與版本限制同一張表判斷（`release.py claimable` 的複本）。
+`release-backport` 單由主機端 release-poller 開好就帶 `ready-for-agent`（不經 triage、不受放行限制），
+它過得了版本限制、照樣算進來，所以它們可能讓 WIP 達標而停止放行。
 
 「被驗收送回、正在重做」＝ issue 帶 `agent-done`，而且它的 open PR 在**目前的
 head SHA** 上有 `wman-pm` 的 `CHANGES_REQUESTED` review（Ruling R19，2026-10-17）：
@@ -325,10 +328,37 @@ PR 是方向提案，沒有對應的 issue、也不佔開發 bot。它本來就�
 `closingIssuesReferences` 是空的；下面的 jq 仍明確把它濾掉，不靠「剛好沒有連結」。
 
 ```bash
+# ready-for-agent 的版本限制（同下面「版本限制」那張表）。$ms＝repo 全部 milestone、$iss[0]＝open issue 清單
+cat > /tmp/wip-gate.jq <<'JQ'
+def hdr: (.description // "") | split("\n") | (map(test("^\\s*---\\s*$")) | index(true)) as $s | if $s == null then . else .[:$s] end;
+def field($k): [hdr[] | select(test("^\\s*" + $k + "\\s*[：:]")) | sub("^\\s*" + $k + "\\s*[：:]\\s*"; "") | sub("\\s+$"; "")] | first;
+def z: .title | split(".")[2] | tonumber;
+["草案","開發中","待定版","已定版","送審中","修正中","待上線","已上線"] as $states
+| [$ms[] | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))] as $v
+| ([$v[] | select(.state == "open" and z == 0 and field("狀態") == "開發中")] | length) as $dev
+| def pass:
+    [.labels[].name] as $l
+    | if ($v | length) == 0 then true
+      elif ($l | index("baseline-red")) or ($l | index("release-backport")) then true
+      else (.milestone.number // -1) as $n | ([$v[] | select(.number == $n)] | first) as $m
+        | if $m == null or $m.state != "open" then false
+          else ($m | field("狀態")) as $st | ($m | z) as $z
+            | if ($states | index($st)) == null then false
+              elif $z == 0 and $st == "待定版" and (($m | field("分支")) // "") == "" then false
+              elif ["待定版","已定版","送審中","修正中","待上線"] | index($st) then true
+              elif $st == "開發中" then ($z > 0 or $dev <= 1)
+              else false end
+          end
+      end;
+[$iss[0][] | select(all(.labels[]; .name != "needs-human"))
+  | select(any(.labels[]; .name == "agent-active") or (any(.labels[]; .name == "ready-for-agent") and pass))] | length
+JQ
 WIP=0
 for R in wm4n/chainbreak wm4n/hangman; do
-  if N=$(gh issue list --repo "$R" --state open --limit 200 --json number,labels \
-    --jq '[.[] | select(any(.labels[]; .name == "agent-active" or .name == "ready-for-agent") and all(.labels[]; .name != "needs-human"))] | length'); then
+  if gh api "repos/$R/milestones?state=all&per_page=100" --paginate --jq '.[]' > /tmp/wip-ms.jsonl \
+     && gh issue list --repo "$R" --state open --limit 200 --json number,labels,milestone > /tmp/wip-iss.json \
+     && N=$(jq -n --slurpfile ms /tmp/wip-ms.jsonl --slurpfile iss /tmp/wip-iss.json -f /tmp/wip-gate.jq) \
+     && [ -n "$N" ]; then
     WIP=$((WIP + N))
   else
     WIP=FAILED; break
@@ -387,10 +417,11 @@ repo，主機端 `agent-dev-poller` 只認領 `release.py claimable` 判 `allow`
 VER=FAILED; MS_ROWS=; ISSUE_MS=
 if MS_ROWS=$(gh api "repos/$REPO/milestones?state=all&per_page=100" --paginate --jq '.[]
     | select(.title | test("^v[0-9]+\\.[0-9]+\\.[0-9]+$"))
-    | [.number, .title, .state, ((.description // "") | split("\n")
+    | ((.description // "") | split("\n")
         | (map(test("^\\s*---\\s*$")) | index(true)) as $sep
-        | (if $sep == null then . else .[:$sep] end)
-        | map(select(test("^\\s*狀態\\s*[：:]"))) | first // "（沒有狀態行）")] | @tsv') \
+        | (if $sep == null then . else .[:$sep] end)) as $hdr
+    | [.number, .title, .state, ($hdr | map(select(test("^\\s*狀態\\s*[：:]"))) | first // "（沒有狀態行）"),
+       ($hdr | map(select(test("^\\s*分支\\s*[：:]"))) | first // "（沒有分支行）")] | @tsv') \
   && ISSUE_MS=$(gh issue view "$NUM" --repo "$REPO" --json milestone,labels \
     --jq '"ms=\(.milestone.number // "none") labels=\([.labels[].name] | join(","))"'); then
   VER=ok
@@ -399,7 +430,7 @@ echo "ver=$VER $ISSUE_MS"
 printf '%s\n' "$MS_ROWS"
 ```
 
-`MS_ROWS` 每行是 `編號、標題、open/closed、狀態行`（只讀描述開頭到第一個只有 `---` 的行之間，`---` 之後的自由文字不算）。狀態取狀態行冒號後的字（全形半形冒號都收，去前後空白），
+`MS_ROWS` 每行是 `編號、標題、open/closed、狀態行、分支行`（只讀描述開頭到第一個只有 `---` 的行之間，`---` 之後的自由文字不算）。狀態取狀態行冒號後的字（全形半形冒號都收，去前後空白），
 必須逐字是八個值之一：`草案`、`開發中`、`待定版`、`已定版`、`送審中`、`修正中`、`待上線`、`已上線`。
 `VER=FAILED` → 當作過不了，本輪不放行這張。`MS_ROWS` 空白且 `VER=ok` → 未啟用，過。
 
@@ -409,6 +440,7 @@ printf '%s\n' "$MS_ROWS"
 | --- | --- |
 | 帶 `baseline-red` | 過（修 main 的紅，不受版本限制） |
 | 掛的 milestone 標題合法，但狀態看不懂（含沒有狀態行） | 不過：版本狀態看不懂 |
+| 掛在 open 的版本上，`z == 0`，狀態 `待定版`，分支行冒號後是空的（含沒有分支行） | 不過：首次定版還沒完成，`release/<x>.<y>` 可能還不存在 |
 | 掛在 open 的版本上，狀態是 `待定版`、`已定版`、`送審中`、`修正中`、`待上線` | 過（修正單，在 release 分支上做） |
 | 掛在 open 的版本上，`z > 0`，狀態 `開發中` | 過（修補版） |
 | 掛在 open 的版本上，`z == 0`，狀態 `開發中` | 過；但這個 repo open 的 `z == 0` 且 `開發中` 的版本有兩個以上時，這類單全都不過：同時有多個開發中的版本 |
