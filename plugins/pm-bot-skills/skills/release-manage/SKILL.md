@@ -171,9 +171,10 @@ LIB
    ```
 
    依序取第一個成立的：
-   - **人類或觸發點指名了版本**（例如「v1.18.0 草案」「修補版 v1.18.1」）→ 就是它。
-   - **已經有 `狀態：草案` 且 open 的 milestone** → 沿用它，不再開另一份。有好幾份草案時取版號最小的，
-     回覆裡提一句還有哪幾份。
+   - **人類或觸發點指名了版本**（例如「v1.18.0 草案」「修補版 v1.18.1」）→ 就是它。修補版（`z > 0`）草案只走這一條。
+   - **已經有 `狀態：草案`、open、`z == 0` 的 milestone** → 沿用它，不再開另一份。有好幾份時取版號最小的，
+     回覆裡提一句還有哪幾份。沒指名版本的觸發（週期性的、「擬下一版」）只看 `z == 0` 的草案：修補版草案是為了
+     某個上線後問題開的，下一版的範圍寫進去會混在修補版裡送審。
    - **沒有草案，而且人類或觸發點要一份新的** → 才算新版號：取所有 milestone 標題與 tag 裡最大的
      `v<x>.<y>.<z>`，新版是 `v<x>.<y+1>.0`；一個都沒有就 `v1.0.0`。修補版是同一個 `x.y` 的
      `z` 加一，並且要先確認 `release/<x>.<y>` 分支存在（見「上線後發現的問題」）。
@@ -286,9 +287,25 @@ LIB
   一般新需求回覆「這版已定版，排進下一版」，提議掛到下一版 milestone。
 - **刪**：`gh issue edit "$N" --repo "$REPO" --remove-milestone`（失敗改
   `gh api -X PATCH "repos/$REPO/issues/$N" -F milestone=null`）；人類說排到下一版就
-  `--milestone "<下一版標題>"`。
-- 完成判準：`gh issue view "$N" --repo "$REPO" --json milestone --jq '.milestone.title'` 是預期值（刪
-  則為空）。
+  `--milestone "<下一版標題>"`。接著**收回放行**（見下方「移出版本時收回放行」）。
+- 完成判準：`gh issue view "$N" --repo "$REPO" --json milestone,labels --jq '[.milestone.title, ([.labels[].name] | join(","))]'`
+  的 milestone 是預期值（刪則為空）；照下一段收回放行的單，labels 有 `grill-me-done`、沒有 `ready-for-agent`。
+
+**移出版本時收回放行。** 單移出版本（刪、排到下一版、定版前移到下一版），而且移到的地方不是 `開發中` 的版本
+（沒掛 milestone、`草案`）時，`agent-dev-poller` 不會再認領它，`ready-for-agent` 留著只會佔住 `backlog-triage` 的
+WIP 名額。單帶 `ready-for-agent`、**沒有** `agent-active` 時，換回 triage 放行前的 label，等它進了開發中的版本再由
+triage 放行：
+
+```bash
+L=$(gh issue view "$N" --repo "$REPO" --json labels --jq '[.labels[].name] | join(",")')
+case ",$L," in
+  *,agent-active,*) ;;   # 已經在做：label 不動，做完照常走
+  *,ready-for-agent,*) gh issue edit "$N" --repo "$REPO" --remove-label ready-for-agent \
+                       && gh issue edit "$N" --repo "$REPO" --add-label grill-me-done ;;
+esac
+```
+
+先移除再加：同時帶兩個 label 時 triage 會把它當成「放行做到一半」補完放行。`release-backport` 單不移出版本，不適用。
 
 **提議不等於排入。** 你自己發現該增刪（triage 看到新 bug、亮點動搖）時，在版本單留言
 `## Summer 提議：增刪`，列出單與理由，Discord 回報，等人類表態才照上面做。
@@ -307,8 +324,8 @@ LIB
    ```
 
    - 沒有 → 下一步。
-   - 有，而且人類原話說了移到下一版 → 逐張 `--milestone "<下一版標題>"`。下一版 milestone 不存在 →
-     先照「擬草案」開一份。
+   - 有，而且人類原話說了移到下一版 → 逐張 `--milestone "<下一版標題>"`，再逐張做「移出版本時收回放行」。
+     下一版 milestone 不存在 → 先照「擬草案」開一份。
    - 有，人類沒說怎麼處理 → 列出這些單，問「移到下一版，還是等做完」，**不寫狀態**。
      `release-poller` 在首次定版時看到沒完成的承諾單會拒絕並通知，留著不處理版本會卡住。
 3. `ms_edit "$MS" 狀態=待定版 && ms_put "$MS"`。
@@ -339,20 +356,21 @@ LIB
 
 ### 重新定版（`修正中` → `待定版`）
 
-人類說修好了、重新打包（你也可以在修正單都關了時提議，不自己寫）。寫之前兩項都要過，原因同一個：
-`release-poller` 看到分支 head 還是版號 commit 時，直接把舊 rc 記回 `已定版`，不檢查 open 的修正單，
-也不遞增 build——這時寫 `待定版` 等於把沒修的版本當成修好的重送。
+人類說修好了、重新打包（你也可以在修正單都關了時提議，不自己寫）。`release-poller` 重新定版時一定遞增 build、
+打新的 rc：分支上有新 commit 就在上面疊版號 commit；分支 head 還是上次送審點的版號 commit（退件只改商店資料、
+沒有改程式）也照樣疊一個新的。milestone 上還有 open 的修正單時它會擋住並 @人類。
 
-1. 沒有 open 的修正單：跑「定版」步驟 2 的查詢，有就不寫、列給人類。
-2. 修正已經 merge 進分支：分支 head 不是版號 commit。
+1. **門檻**：沒有 open 的修正單。跑「定版」步驟 2 的查詢，有就不寫、列給人類。
+2. **提醒**：看分支上有沒有新 commit。
 
    ```bash
    gh api "repos/$REPO/commits?sha=release/<x>.<y>&per_page=1" --jq '.[0].commit.message | split("\n")[0]'
    ```
 
-   印出以 `chore(release): v` 開頭 → 還沒有修正進分支，不寫，告訴人類修正單的 PR 還沒 merge。
+   印出以 `chore(release): v` 開頭 → 上次送審之後分支沒有新 commit，這次只會換 build 重新打包。照樣寫，回覆裡
+   講明這一點；人類原本以為有程式修正的話，他看了會說，那時再處理。
 
-兩項都過才 `ms_edit "$MS" 狀態=待定版 && ms_put "$MS"`，回覆同「定版」步驟 4（這次 build 遞增、新 rc）。
+門檻過了就 `ms_edit "$MS" 狀態=待定版 && ms_put "$MS"`，回覆同「定版」步驟 4（這次 build 遞增、新 rc）。
 
 ### 通過（`送審中` → `待上線`）
 
