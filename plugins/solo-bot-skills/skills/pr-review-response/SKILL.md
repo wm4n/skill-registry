@@ -37,7 +37,7 @@ worktree（persona 的 Repo 工作隔離規定 PR 開好就清掉 worktree）。
   最新標記是 `start`、超過 TTL 且之後沒有新 commit，才當成卡住重新觸發。所以
   每一輪都要以 `done` 或 `failed` 收尾——停在 `start` 的一輪會在 TTL 後被重跑。
 - 簽名開頭是 em dash（U+2014）「—」。Genie 也用這個簽名，不用 persona 平常的
-  `— Instructed by …`——同 `auto-dev-pipeline`，這串文字是給程式比對的。
+  `— Instructed by …`，因為這串文字是給程式比對的。
 - 標記與簽名都直接複製本文件裡的字串，不要自己重打。
 
 ## 步驟
