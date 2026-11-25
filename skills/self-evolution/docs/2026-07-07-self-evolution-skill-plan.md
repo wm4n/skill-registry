@@ -1,3 +1,5 @@
+> **已被 v1.6.0 取代**（2026-11-25）：本文件記錄 v1.2.0 的原始設計，現行行為以 `SKILL.md` 與 `references/` 為準。
+
 # Self-Evolution Skill Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

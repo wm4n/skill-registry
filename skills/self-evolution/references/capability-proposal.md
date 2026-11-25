@@ -47,8 +47,9 @@
 「我注意到 <模式> 已重複三次，已備好 skill 草稿在
 `~/.claude/evolution/proposals/<slug>/`，要啟用嗎？」
 
-- **批准** → 搬進 `~/.claude/skills/<slug>/SKILL.md`，PROPOSAL.md 狀態改
-  `approved`，INDEX 同步；然後**真實跑一輪驗證**（用真實情境走一次新 skill，
+- **批准** → 搬進 `~/.claude/skills/<slug>/SKILL.md`，並建 symlink
+  `~/.codex/skills/<slug>` → `~/.claude/skills/<slug>` 讓 Codex 也載得到（建完印
+  `readlink` 確認）；PROPOSAL.md 狀態改 `approved`，INDEX 同步；然後**真實跑一輪驗證**（用真實情境走一次新 skill，
   確認觸發與流程正確）。搬移前先確認 `~/.claude/skills/<slug>/` 不存在同名
   skill，撞名則先與使用者確認改名
 - **否決** → 狀態改 `rejected`，記下否決理由，INDEX 同步，留檔不重提
