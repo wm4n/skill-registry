@@ -6,7 +6,7 @@ description: >-
   觸發，或人類在 Discord 手打）：回到該 PR 的原分支，逐條回應人類按
   Request changes 留下的 review 意見——預設直接改、補 commit、push 回原分支；
   意見有歧義、超出原 issue 範圍、或技術上不認同時改成回 comment 說明。
-  Rick／Morty／Genie 共用，不屬於任何 pipeline。
+  Rick／Morty 共用，不屬於任何 pipeline。
 ---
 
 # pr-review-response
@@ -16,7 +16,7 @@ description: >-
 與留言判斷要做什麼，不依賴 session 記憶，也不假設本地還留著當初開發用的
 worktree（persona 的 Repo 工作隔離規定 PR 開好就清掉 worktree）。
 
-`<Bot>` 在本文件裡一律代入**執行本 skill 的 bot 自己的名字**（Rick／Morty／Genie）。
+`<Bot>` 在本文件裡一律代入**執行本 skill 的 bot 自己的名字**（Rick／Morty）。
 
 ## 留言標記與簽名（poller 與本 skill 都靠這段判斷狀態）
 
@@ -36,8 +36,8 @@ worktree（persona 的 Repo 工作隔離規定 PR 開好就清掉 worktree）。
 - **poller 怎麼讀**：三種標記的最新時間都算「已處理」，review 比它新才觸發；
   最新標記是 `start`、超過 TTL 且之後沒有新 commit，才當成卡住重新觸發。所以
   每一輪都要以 `done` 或 `failed` 收尾——停在 `start` 的一輪會在 TTL 後被重跑。
-- 簽名開頭是 em dash（U+2014）「—」。Genie 也用這個簽名，不用 persona 平常的
-  `— Instructed by …`，因為這串文字是給程式比對的。
+- 簽名開頭是 em dash（U+2014）「—」。這串文字是給 poller 比對的：即使 persona 平常
+  另有署名（例如 `— Instructed by …`），在本 skill 裡也一律照這裡寫。
 - 標記與簽名都直接複製本文件裡的字串，不要自己重打。
 
 ## 步驟
